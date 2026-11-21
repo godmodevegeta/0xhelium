@@ -3,9 +3,9 @@
 A CPU-first simulation robustness prototype for legged robots. Milestone M0 runs an existing
 pretrained Go1 walking policy in native MuJoCo and records a trajectory with a run manifest.
 
-Status: M0–M2 approved; M3 (web app with 3D replays) implemented locally, awaiting review, not
-deployed. Every command below was run, and its observed output is in `docs/milestones/M0.md` to
-`M3.md`.
+Status: M0–M3 approved; M4 (automated failure discovery and shrinking) implemented locally,
+awaiting review, not deployed. Every command below was run, and its observed output is in
+`docs/milestones/M0.md` to `M4.md`.
 The pretrained policy (`go1-walk-s0` from [weeble](https://github.com/mottopanikeiku/weeble)) passed
 the fixed walking criteria: a 10 s forward run at 0.944 m/s mean over 2–10 s, and a zero-command run
 that stayed within 0.016 m. A 100 N shove toward its right for 0.1 s, started at each of the 256
@@ -95,6 +95,19 @@ Two presets: **Hidden Phase Vulnerability** shows the precomputed M2 sweep (11/2
 experiments at 150 N on request and replays each trial. The browser only plays back poses computed
 by MuJoCo on the server.
 
+M4 failure discovery (pycma is in the `server` and `search` extras):
+
+```bash
+uv run robustlab discover --algorithm cmaes --budget 64 --seed 0 --shrink-budget 32 \
+    --out runs/m4/cmaes-s0                       # or --algorithm random
+uv run python scripts/compare_search.py --seeds 0-19 --budget 64 --shrink-budget 32
+```
+
+The search looks for the lowest-impulse shove (force 10–150 N, any horizontal direction, start
+2.000–3.020 s, duration 40–200 ms) that makes the robot fall. Each failure is confirmed with a
+paired re-simulation, then shrunk locally. The web app's **Failure Discovery** tab runs the same
+search with live progress and replays the result next to the nominal robot.
+
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and
 `manifest.json` into the `--out` directory. It refuses to replace an existing run unless
 `--overwrite` is given. Commands are body-frame `vx,vy,yaw` (m/s, m/s, rad/s) within the policy's
@@ -116,6 +129,8 @@ committed; `scripts/fetch_assets.py` re-downloads them from the pinned weeble co
 - `docs/milestones/M2.md` — M2 evidence: paired suites, fall frequencies, what they establish
 - `.kiro/specs/web-replay/` — M3 requirements, design and tasks
 - `docs/milestones/M3.md` — M3 evidence: force sweep, presets, live runs, replay, endpoint timings
+- `.kiro/specs/m4-failure-discovery/` — M4 requirements, design and tasks
+- `docs/milestones/M4.md` — M4 evidence: Random Search vs CMA-ES, shrinking, web runs
 - `docs/decision-log/` — architecture decision records
 
 ## License

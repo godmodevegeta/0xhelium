@@ -164,3 +164,17 @@ Spec: `.kiro/specs/web-replay/`. M2 merged into `main` with `--no-ff` (`451fef8`
 | 2–4 | `run_trial` refactor, `replay.py`, presets, `robustlab.api`, `serve`, API tests | `3723669` | M2 digest unchanged; 132 fast + 16 integration tests pass |
 | 5 | `web/` React + TS + Three.js viewer | `57b25a9` | `tsc --noEmit` clean; `vite build` ok; headless screenshots |
 | 6 | Live runs, endpoint timings, fresh-clone smoke, docs | final M3 commit | 4/16, 5/16, 4/16 live; reproduce command matches digest; clone serves and replays |
+
+## M4 — Automated failure discovery and counterexample shrinking
+
+Spec: `.kiro/specs/m4-failure-discovery/`. Tag `m3-baseline` = `deeb350`; `m3-web-replay`
+(with the playback fix `e455db2`) merged into `main` with `--no-ff` (`8bb69f6`, not pushed).
+Branch `m4-failure-discovery`. Measured results are in `docs/milestones/M4.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| 1 | Spec; pycma 4.6.0 dependency; private-generator reproducibility probe | `290ddd0` | Same seed gives the same asks, independent of NumPy's global RNG |
+| 2–3 | `robustlab.search` (space, objective, engine, shrink, report), `discover` CLI, Properties 20–27 | `69c3650` | 143 fast + 18 integration tests pass |
+| 3 | `scripts/compare_search.py`; 20-seed matched comparison; fixture | `70a07c2`, `7d6aed8` | CMA-ES 20/20 vs Random 14/20 found (Fisher p = 0.020); both-found impulse p = 0.18 |
+| 4 | Discovery API, Failure Discovery tab | `93c6f90`, `ef0236c`, `5bb7acb` | 3 API runs 5.9–7.7 s, replays match; reproduce command matches digest |
+| 5 | Validation, docs | final M4 commit | 157 fast + 19 integration; Stop hook 13.5 s |
