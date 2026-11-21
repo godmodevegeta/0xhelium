@@ -72,3 +72,12 @@ details li { margin: 6px 0; line-height: 1.4; }
 .banner { background: #fde4e4; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
 code { background: #f1f3f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 footer { margin-top: 24px; }
+
+.wrap { flex-wrap: wrap; }
+.radio { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; }
+.field { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.field input { width: 90px; padding: 6px 8px; border: 1px solid #c3cad3; border-radius: 6px; font: inherit; }
+.search-svg { width: 100%; height: 220px; display: block; background: #fafbfc; border-radius: 6px; }
+.failures td, .failures th { font-variant-numeric: tabular-nums; }
+.comparison { max-width: 340px; }
+.comparison table td, .comparison table th { padding: 2px 4px; }

@@ -12,6 +12,7 @@ import platform
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import mujoco
 import numpy as np
@@ -24,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from robustlab import __version__
 from robustlab.api.jobs import BusyError, JobManager, Worker
 from robustlab.api.presets import (
+    DISCOVERY_COMPARISON_DIR,
     HIDDEN_PHASE_DIR,
     LIVE_STRESS_DIR,
     PresetError,
@@ -43,6 +45,7 @@ class ServerSettings:
     runs_dir: Path
     live_suite: Path
     web_dist: Path
+    discovery_timeout_s: float = 120.0
 
     @classmethod
     def from_env(cls) -> ServerSettings:
@@ -54,12 +57,21 @@ class ServerSettings:
                 os.environ.get("ROBUSTLAB_LIVE_SUITE", root / LIVE_STRESS_DIR / "suite.json")
             ),
             web_dist=Path(os.environ.get("ROBUSTLAB_WEB_DIST", root / "web" / "dist")),
+            discovery_timeout_s=float(os.environ.get("ROBUSTLAB_DISCOVERY_TIMEOUT_S", "120")),
         )
 
 
 class LiveRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     seed: int | None = Field(default=None, ge=0, lt=2**64)
+
+
+class DiscoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    algorithm: Literal["random", "cmaes"]
+    budget: int = Field(default=64, ge=8, le=256, multiple_of=8)
+    seed: int | None = Field(default=None, ge=0, lt=2**63)
+    shrink_budget: int = Field(default=32, ge=0, le=128)
 
 
 def _episode_outcome(summary: dict) -> dict:
@@ -77,7 +89,15 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
     hidden_trials = {t["start_substep"]: t for t in hidden_report["trials"]}
     hidden_config = load_suite_config(hidden_report["config"])
     live_reference = report_summary(live.json("reference-grid-256.json"))
-    jobs = JobManager(settings.root, settings.runs_dir, settings.live_suite, live.meta)
+    comparison = load_preset(settings.root, DISCOVERY_COMPARISON_DIR)
+    comparison_summary = comparison.json("summary.json")
+    jobs = JobManager(
+        settings.root,
+        settings.runs_dir,
+        settings.live_suite,
+        live.meta,
+        discovery_timeout_s=settings.discovery_timeout_s,
+    )
     model_cache: dict[str, dict] = {}
 
     @asynccontextmanager
@@ -237,6 +257,122 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             )
 
         return await wait(jobs.replay((run_id, trial), compute))
+
+    # ------------------------------------------------------------------ failure discovery
+
+    @app.get("/api/discovery")
+    async def discovery_info():
+        from robustlab.search.space import bounds_record
+
+        return {
+            "bounds": bounds_record(),
+            "defaults": {"budget": 64, "shrink_budget": 32},
+            "limits": {
+                "budget": {"min": 8, "max": 256, "multiple_of": 8},
+                "shrink_budget": {"min": 0, "max": 128},
+                "timeout_s": settings.discovery_timeout_s,
+            },
+            "fixed": {
+                "command": [1.0, 0.0, 0.0],
+                "horizon_s": 5.0,
+                "scene": "fall-contact",
+                "initial_state": "nominal reset",
+            },
+            "comparison": {
+                "result_origin": "precomputed",
+                "preset": {k: comparison.meta[k] for k in ("id", "version", "title", "source")},
+                "protocol": comparison_summary["protocol"],
+                "aggregate": comparison_summary["aggregate"],
+                "paired": comparison_summary["paired"],
+                "found_failure_fisher_p_two_sided": comparison_summary[
+                    "found_failure_fisher_p_two_sided"
+                ],
+                "rows": comparison_summary["rows"],
+                "git": comparison_summary["git"],
+            },
+            "runs": jobs.list_discoveries(),
+        }
+
+    @app.post("/api/discovery/runs", status_code=202)
+    async def start_discovery(body: DiscoveryRequest):
+        from robustlab.search.engine import SearchConfigError
+
+        try:
+            job = jobs.start_discovery(body.algorithm, body.budget, body.seed, body.shrink_budget)
+        except BusyError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except SearchConfigError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"run_id": job.run_id, "request": job.request, "status": job.status}
+
+    @app.get("/api/discovery/runs/{run_id}")
+    async def discovery_status(run_id: str):
+        status = jobs.discovery_status(run_id)
+        if status is None:
+            raise HTTPException(404, "unknown discovery run")
+        return status
+
+    @app.post("/api/discovery/runs/{run_id}/cancel", status_code=202)
+    async def cancel_discovery(run_id: str):
+        if jobs.discovery_status(run_id) is None:
+            raise HTTPException(404, "unknown discovery run")
+        if not jobs.cancel_discovery(run_id):
+            raise HTTPException(409, "run is not active")
+        return {"run_id": run_id, "cancel_requested": True}
+
+    @app.get("/api/discovery/runs/{run_id}/replay")
+    async def discovery_replay(run_id: str, which: Literal["final", "search"] = "final"):
+        from robustlab.search.engine import PhysicsEvaluator
+        from robustlab.search.space import Candidate
+
+        record = jobs.discovery_record(run_id)
+        if record is None:
+            raise HTTPException(404, "unknown or unfinished discovery run")
+        if which == "final":
+            source = record.get("final")
+        else:
+            source = record["confirmation"]["confirmed"]
+        if source is None:
+            raise HTTPException(404, "this run has no confirmed failure to replay")
+        c = source["candidate"]
+        candidate = Candidate(c["force_n"], c["direction_deg"], c["start_substep"],
+                              c["duration_substeps"])  # fmt: skip
+        recorded_digest = source["digest"]
+
+        def compute(worker: Worker) -> dict:
+            evaluator = worker.cache.get("evaluator")
+            if evaluator is None:
+                evaluator = worker.cache["evaluator"] = PhysicsEvaluator(
+                    worker.stack("fall-contact")
+                )
+            trial, (nominal, _), (attacked, _) = evaluator.paired_trial(candidate)
+            match = trial["attacked"]["digest"] == recorded_digest
+            verification = {
+                "all_match": match and trial["attacked"]["outcome"] == "fell",
+                "recorded_commit": record["provenance"]["git"]["commit"],
+                "cases": {
+                    "attacked": {
+                        "recorded_digest": recorded_digest,
+                        "resimulated_digest": trial["attacked"]["digest"],
+                        "digest_match": match,
+                        "recorded_outcome": "fell",
+                        "resimulated_outcome": trial["attacked"]["outcome"],
+                        "outcome_match": trial["attacked"]["outcome"] == "fell",
+                    }
+                },
+            }
+            return replay_payload(
+                evaluator.stack.model,
+                (trajectory_dict(nominal), _episode_outcome(trial["nominal"])),
+                (trajectory_dict(attacked), _episode_outcome(trial["attacked"])),
+                trial["push"],
+                source="re-simulated",
+                verification=verification,
+                extra={"run_id": run_id, "which": which, "candidate": source["candidate"],
+                       "stance_at_start": trial["stance_at_start"], "start_s": trial["start_s"]},
+            )  # fmt: skip
+
+        return await wait(jobs.replay(("discovery", run_id, which), compute))
 
     if settings.web_dist.is_dir():
         app.mount("/", StaticFiles(directory=settings.web_dist, html=True), name="web")

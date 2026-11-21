@@ -353,6 +353,49 @@ def _cmd_experiment(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_discover(args: argparse.Namespace) -> int:
+    root = Path(args.root)
+    from robustlab.assets import AssetError, verify_assets
+
+    try:
+        from robustlab.search.engine import SearchConfig, SearchConfigError, run_discovery
+        from robustlab.search.report import format_discovery, write_discovery
+    except ImportError as exc:
+        print(f"discover: {exc}; install with: uv sync --extra search", file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        config = SearchConfig(args.algorithm, args.budget, args.seed, args.shrink_budget,
+                              args.timeout)  # fmt: skip
+    except SearchConfigError as exc:
+        print(f"discover: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    out = Path(args.out)
+    if (out / "discovery.json").exists() and not args.overwrite:
+        print(f"discover: {out / 'discovery.json'} exists (use --overwrite)", file=sys.stderr)
+        return EXIT_WRITE
+    issues = verify_assets(root)
+    if issues:
+        for issue in issues:
+            print(f"FAIL  {issue}", file=sys.stderr)
+        return EXIT_ASSETS
+    from robustlab.experiments.stack import load_stack
+
+    try:
+        stack = load_stack(root, Path(args.policy), "fall-contact")
+    except (AssetError, ValueError) as exc:
+        print(f"discover: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    record = run_discovery(config, stack)
+    try:
+        write_discovery(out, record)
+    except OSError as exc:
+        print(f"discover: write failed: {exc}", file=sys.stderr)
+        return EXIT_WRITE
+    print(format_discovery(record))
+    print(f"record           {out / 'discovery.json'}")
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     import os
 
@@ -446,6 +489,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     experiment.add_argument("--root", default=".", help="repository root (default: current dir)")
     experiment.set_defaults(func=_cmd_experiment)
+
+    discover = subparsers.add_parser(
+        "discover",
+        help="bounded search for a low-impulse shove that makes the robot fall (needs pycma)",
+    )
+    discover.add_argument("--algorithm", choices=("random", "cmaes"), required=True)
+    discover.add_argument("--budget", type=int, default=64, help="search rollouts (multiple of 8)")
+    discover.add_argument("--seed", type=int, default=0)
+    discover.add_argument("--shrink-budget", type=int, default=32, help="shrinking rollouts")
+    discover.add_argument("--timeout", type=float, default=300.0, help="wall-clock limit, s")
+    discover.add_argument("--policy", default="policies/go1-walk-s0.json")
+    discover.add_argument("--out", required=True, help="output directory, e.g. runs/m4/x")
+    discover.add_argument("--overwrite", action="store_true")
+    discover.add_argument("--root", default=".", help="repository root (default: current dir)")
+    discover.set_defaults(func=_cmd_discover)
 
     serve = subparsers.add_parser("serve", help="start the web app (needs the server extra)")
     serve.add_argument("--host", default="127.0.0.1")

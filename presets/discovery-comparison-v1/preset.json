@@ -1,0 +1,13 @@
+{
+  "id": "discovery-comparison",
+  "version": 1,
+  "title": "Random Search vs CMA-ES, matched seeds",
+  "files": {
+    "summary.json": "64352bc30d8b001fbf7820ce92f1adaae332fe173971080ba0cb86207f6e3012"
+  },
+  "source": {
+    "command": "uv run python scripts/compare_search.py --seeds 0-19 --budget 64 --shrink-budget 32",
+    "git_commit": "70a07c28825ce438640fe5d369919998bdc58a6e",
+    "milestone": "M4"
+  }
+}

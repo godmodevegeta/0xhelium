@@ -16,6 +16,7 @@ from typing import Any
 FOOT_ORDER = ("FR", "FL", "RR", "RL")
 HIDDEN_PHASE_DIR = "presets/hidden-phase-v1"
 LIVE_STRESS_DIR = "presets/live-stress-v1"
+DISCOVERY_COMPARISON_DIR = "presets/discovery-comparison-v1"
 
 
 class PresetError(Exception):
