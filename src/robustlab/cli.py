@@ -353,6 +353,21 @@ def _cmd_experiment(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    import os
+
+    try:
+        import uvicorn
+    except ImportError:
+        print("serve: install the server extra: uv sync --extra server", file=sys.stderr)
+        return EXIT_INVALID
+    os.environ.setdefault("ROBUSTLAB_ROOT", str(Path(args.root).resolve()))
+    uvicorn.run(
+        "robustlab.api.app:create_app", factory=True, host=args.host, port=args.port, workers=1
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="robustlab",
@@ -431,6 +446,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     experiment.add_argument("--root", default=".", help="repository root (default: current dir)")
     experiment.set_defaults(func=_cmd_experiment)
+
+    serve = subparsers.add_parser("serve", help="start the web app (needs the server extra)")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--root", default=".", help="repository root (default: current dir)")
+    serve.set_defaults(func=_cmd_serve)
     return parser
 
 

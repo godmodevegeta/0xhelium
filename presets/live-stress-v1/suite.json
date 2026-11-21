@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "live-stress-150N-stratified-16",
+  "description": "150 N toward the robot's right for 0.1 s while walking at 1 m/s; 16 shove start times by stratified sampling over [2.000, 3.024) s. Identical to the M2 stratified example except the force.",
+  "policy": "policies/go1-walk-s0.json",
+  "scene": "fall-contact",
+  "command": [
+    1.0,
+    0.0,
+    0.0
+  ],
+  "horizon_s": 5.0,
+  "trials": 16,
+  "seed": 20261121,
+  "attack": {
+    "kind": "push",
+    "force_n": 150.0,
+    "direction": "right",
+    "duration_s": 0.1,
+    "start": {
+      "method": "stratified",
+      "low_s": 2.0,
+      "high_s": 3.024
+    }
+  }
+}

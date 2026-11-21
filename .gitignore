@@ -14,3 +14,6 @@ __pycache__/
 .DS_Store
 # Hypothesis working directory
 .hypothesis/
+# Web app dependencies and build output
+web/node_modules/
+web/dist/
