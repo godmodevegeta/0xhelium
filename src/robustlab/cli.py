@@ -105,23 +105,25 @@ def _parse_command(text: str) -> tuple[float, float, float]:
     return values  # type: ignore[return-value]
 
 
-def _load_stack(root: Path, policy_path: Path):
-    """Load and cross-check model + policy. Returns (model, ids, policy, actor, load_s)."""
+def _load_stack(root: Path, policy_path: Path, scene: str = "fall-contact"):
+    """Load and cross-check scene + policy. Returns (scene_info, ids, policy, actor, load_s)."""
     import time
 
     from robustlab.assets import locked_sha256
-    from robustlab.physics.model import apply_model_parameters, check_model, load_model, resolve_ids
+    from robustlab.physics.model import apply_model_parameters, check_model, resolve_ids
+    from robustlab.physics.scene import build_scene
     from robustlab.policy.actor import Actor, load_policy
 
     start = time.perf_counter()
     policy_rel = Path(policy_path).resolve().relative_to(root.resolve()).as_posix()
     policy = load_policy(policy_path, locked_sha256(root, policy_rel))
-    model = load_model(root / MODEL_XML_RELPATH)
+    scene_info = build_scene(root / MODEL_XML_RELPATH, scene)
+    model = scene_info.model
     apply_model_parameters(model, policy.model_parameters)
     check_model(model, policy)
     ids = resolve_ids(model)
     actor = Actor(policy)
-    return model, ids, policy, actor, time.perf_counter() - start
+    return scene_info, ids, policy, actor, time.perf_counter() - start
 
 
 def _print_summary(manifest: dict, paths) -> None:
@@ -133,6 +135,7 @@ def _print_summary(manifest: dict, paths) -> None:
 
     rows = [
         ("run", manifest["run_id"]),
+        ("scene", manifest["scene"]["name"]),
         ("command (vx, vy, yaw)", ", ".join(f"{c:g}" for c in manifest["command"])),
         ("horizon", f"{manifest['horizon_s']:g} s ({manifest['n_ticks']} ticks)"),
         ("criteria set", out.get("criteria_set", "upright")),
@@ -142,17 +145,50 @@ def _print_summary(manifest: dict, paths) -> None:
         ("min trunk z", f"{fmt(out['min_trunk_z'])} m"),
         ("finite / no warnings", f"{out['finite']} / {out['warnings_ok']}"),
     ]
+    # Window metrics stop at the horizon and at the last Tick before a fall; label what was used.
+    w0, w1 = out.get("window_s", (2.0, 10.0))
+    used = f"{w0:g}-{min(w1, out.get('progress_until_s', w1)):.2f} s"
+    progress = "until fall" if out.get("fall", {}).get("kind", "none") != "none" else ""
     for key, label, unit in (
-        ("forward_distance_m", "forward distance", "m"),
-        ("mean_forward_speed", "mean fwd speed 2-10 s", "m/s"),
+        ("forward_distance_m", f"forward distance {progress}".strip(), "m"),
+        ("mean_forward_speed", f"mean fwd speed {used}", "m/s"),
         ("horizontal_disp_m", "horizontal displacement", "m"),
         ("yaw_drift_deg", "yaw drift", "deg"),
     ):
         if key in out:
             rows.append((label, f"{fmt(out[key])} {unit}"))
     if "touchdowns" in out:
-        rows.append(("touchdowns 2-10 s FR,FL,RR,RL", ", ".join(map(str, out["touchdowns"]))))
+        rows.append((f"touchdowns {used} FR,FL,RR,RL", ", ".join(map(str, out["touchdowns"]))))
         rows.append(("duty factor FR,FL,RR,RL", ", ".join(f"{d:.2f}" for d in out["duty_factor"])))
+    push = manifest["push"]
+    if push is None:
+        rows.append(("push", "none"))
+    else:
+        world = ", ".join(f"{v:.1f}" for v in push["world_force_n"])
+        rows += [
+            (
+                "push",
+                (
+                    f"{push['force_n']:g} N toward {push['direction_heading_frame']} "
+                    f"(heading frame), t = {push['start_s']:g} to {push['end_s']:g} s"
+                ),
+            ),
+            ("push world force / impulse", f"[{world}] N / {push['impulse_ns']:g} N*s"),
+        ]
+    fall = out["fall"]
+    if fall["kind"] == "none":
+        rows.append(("FELL", "no"))
+    else:
+        detail = fall["events"][fall["reason"]]["detail"]
+        verdict = "yes" if fall["kind"] == "physical" else "NUMERICAL FAILURE (not a fall)"
+        rows.append(("FELL", f"{verdict}: {fall['reason']} at t = {fall['time_s']:.3f} s {detail}"))
+        later = sorted(
+            (e["time_s"], name) for name, e in fall["events"].items() if name != fall["reason"]
+        )
+        if later:
+            rows.append(("later events", ", ".join(f"{n} {t:.3f} s" for t, n in later)))
+    if not fall["nonfoot_contact_detection"]:
+        rows.append(("non-foot contact detection", "unavailable in this scene"))
     rows += [
         (
             "tick latency median/p95/max",
@@ -193,6 +229,7 @@ def _cmd_walk(args: argparse.Namespace) -> int:
     import mujoco
     import numpy as np
 
+    from robustlab.experiments.push import PushError, PushScenario, parse_direction
     from robustlab.experiments.trace import build_manifest, write_run
     from robustlab.experiments.walk import EpisodeConfig, EpisodeRunner, latency_summary
     from robustlab.physics.model import ModelError
@@ -201,8 +238,29 @@ def _cmd_walk(args: argparse.Namespace) -> int:
     if not (0 < args.seconds <= MAX_SECONDS):
         print(f"walk: --seconds must be in (0, {MAX_SECONDS:g}]", file=sys.stderr)
         return EXIT_INVALID
+    push_args = (args.push_force, args.push_direction, args.push_start, args.push_duration)
+    push = None
+    if any(a is not None for a in push_args):
+        if any(a is None for a in push_args):
+            print(
+                "walk: give all of --push-force, --push-direction, --push-start and "
+                "--push-duration, or none",
+                file=sys.stderr,
+            )
+            return EXIT_INVALID
+        try:
+            push = PushScenario(
+                force_n=args.push_force,
+                direction=parse_direction(args.push_direction),
+                start_s=args.push_start,
+                duration_s=args.push_duration,
+            )
+        except PushError as exc:
+            print(f"walk: {exc}", file=sys.stderr)
+            return EXIT_INVALID
     try:
-        model, ids, policy, actor, load_s = _load_stack(root, Path(args.policy))
+        scene_info, ids, policy, actor, load_s = _load_stack(root, Path(args.policy), args.scene)
+        model = scene_info.model
     except (PolicyError, ModelError, AssetError, ValueError) as exc:
         print(f"walk: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_INVALID
@@ -213,7 +271,7 @@ def _cmd_walk(args: argparse.Namespace) -> int:
             )
             return EXIT_INVALID
 
-    config = EpisodeConfig(command=args.command, seconds=args.seconds, seed=args.seed)
+    config = EpisodeConfig(command=args.command, seconds=args.seconds, seed=args.seed, push=push)
     runner = EpisodeRunner(model, ids, policy, actor)
     try:
         record = runner.run(config)
@@ -249,6 +307,8 @@ def _cmd_walk(args: argparse.Namespace) -> int:
         provenance=provenance,
         library_versions={"numpy": np.__version__, "mujoco": mujoco.__version__},
         repo_root=root,
+        scene=scene_info.describe(),
+        push=record.push,
     )
     try:
         paths = write_run(run_dir, record, manifest, overwrite=args.overwrite)
@@ -265,7 +325,10 @@ def _cmd_walk(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="robustlab",
-        description="Robustness Studio M0: pretrained Go1 walking in native MuJoCo (CPU).",
+        description=(
+            "Robustness Studio: pretrained Go1 walking in native MuJoCo (CPU), with an optional "
+            "timed trunk push and substep fall detection."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"robustlab {__version__}")
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
@@ -297,6 +360,23 @@ def build_parser() -> argparse.ArgumentParser:
     walk.add_argument("--out", required=True, help="run directory, e.g. runs/m0/forward")
     walk.add_argument("--seed", type=int, default=0, help="recorded only; M0 has no randomness")
     walk.add_argument("--overwrite", action="store_true", help="replace an existing run")
+    walk.add_argument(
+        "--scene",
+        choices=("fall-contact", "feet-only"),
+        default="fall-contact",
+        help="fall-contact (default): trunk, hips, thighs and knees can touch the floor; "
+        "feet-only: the M0 walk.xml as pinned",
+    )
+    walk.add_argument("--push-force", type=float, help="push magnitude, N, in [0, 150]")
+    walk.add_argument(
+        "--push-direction",
+        help="where the force points, initial-heading frame: forward|backward|left|right|x,y,z "
+        "(right = shove from the robot's left)",
+    )
+    walk.add_argument("--push-start", type=float, help="push start time, s (multiple of 0.004)")
+    walk.add_argument(
+        "--push-duration", type=float, help="push duration, s, in [0, 0.5] (multiple of 0.004)"
+    )
     walk.add_argument("--root", default=".", help="repository root (default: current dir)")
     walk.set_defaults(func=_cmd_walk)
     return parser

@@ -1,5 +1,7 @@
 # Generated experiment evidence
 runs/
+# MuJoCo writes numerical warnings here (e.g. from the NaN-action test)
+MUJOCO_LOG.TXT
 
 # Python environment and caches
 .venv/

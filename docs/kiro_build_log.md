@@ -125,3 +125,17 @@ optimizer, adapter, push perturbation or later-milestone stubs exist.
 
 Environment note carried through all tasks: commands ran as `UV_PYTHON_DOWNLOADS=never uv run
 --frozen …` against the local Python 3.12.2 in `.venv`.
+
+## M1 — Deterministic shove and authoritative fall detection
+
+Spec: `.kiro/specs/fall-detection/`. Branch `m1-fall-detection` from tag `m0-baseline` (`cfe4b13`);
+one writer, checked before each commit. Measured results are in `docs/milestones/M1.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| 1.1–1.3 | Spec, `tests/fixtures/m0_golden.{npz,json}`, collision-variant probe | `747cf49` | Golden files from `runs/m0` with matching SHA-256; all-non-foot collision diverged 0.41 m at 1.5 m/s, `calf2` excluded gave 0 over 29 commands |
+| 2–5 | `physics/scene.py`, `physics/fall.py`, `experiments/push.py`, runner/trace/CLI changes, tests | `11a89f3`, `54411b6` | `pytest -q` 74 passed; `-m integration` 13 passed; Properties 12–16 pass |
+| 6 | Two experiments, shove sweep, latency | runs at `54411b6` | Nominal: no fall; 100 N right: `tilt` at 2.504 s; golden diff 0 in both scenes; median Tick 0.231 ms |
+| 7 | `M1.md`, ADR 0002, README, this section | final M1 commit | ruff clean; suites as above |
+
+The Stop hook (`milestone-verification`) fast suite now takes about 7.3 s, within its 30 s timeout.

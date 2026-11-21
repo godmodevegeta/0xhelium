@@ -3,14 +3,16 @@
 One Tick (control period 0.02 s):
 
 1. `action = actor.act(obs_t)`
-2. `xfrc_applied = 0`; `ctrl = default_pose + 0.5 * action` (float32 arithmetic, no clipping;
-   MuJoCo's actuator ctrlrange still applies)
-3. `mj_step(model, data, nstep=5)` with that ctrl held for all 5 substeps
+2. `ctrl = default_pose + 0.5 * action` (float32 arithmetic, no clipping; MuJoCo's actuator
+   ctrlrange still applies)
+3. 5 substeps, each: `xfrc_applied = 0`; inside the push window the trunk row gets the push force;
+   `mj_step(model, data)`; the FallMonitor checks the new state. With no push this performs the same
+   operations as M0's `mj_step(model, data, nstep=5)` with `xfrc_applied` cleared.
 4. `obs_last_action = last_action`; `last_action = action`
 5. `obs_{t+1} = build(data, obs_last_action, command)` without `mj_forward`
 
 So observation `o[t+1]` carries action `a[t-1]`, as in training. Nothing in an episode is random;
-`seed` is recorded in the manifest for later milestones but does not change M0 results.
+`seed` is recorded in the manifest for later milestones but does not change results.
 """
 
 from __future__ import annotations
@@ -23,13 +25,13 @@ from typing import Protocol
 import mujoco
 import numpy as np
 
+from robustlab.experiments.push import PushScenario
+from robustlab.physics.fall import WARNING_NAMES, FallMonitor, FallResult, height_ok, tilt_ok
 from robustlab.physics.model import ResolvedIds
 from robustlab.policy.actor import Policy
 from robustlab.policy.observation import ObservationBuilder
 
-WARNING_NAMES = tuple(
-    name.removeprefix("mjWARN_") for name in mujoco.mjtWarning.__members__ if name != "mjNWARNING"
-)
+__all__ = ["WARNING_NAMES"]  # re-exported for M0 callers
 
 
 class ActorLike(Protocol):
@@ -41,6 +43,7 @@ class EpisodeConfig:
     command: tuple[float, float, float]
     seconds: float
     seed: int = 0
+    push: PushScenario | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,12 @@ class EpisodeRecord:
     warning_total: np.ndarray  # [T] cumulative MuJoCo warning count
     tick_ns: np.ndarray  # [T] wall time of each Tick
     warnings: dict[str, int] = field(default_factory=dict)
+    # M1 fields (None in records built by M0-era code and tests)
+    nonfoot_contact: np.ndarray | None = None  # [T] bool, any non-foot floor contact in the Tick
+    push_impulse: np.ndarray | None = None  # [T, 3] world-frame impulse applied in the Tick, N*s
+    fall: FallResult | None = None
+    truncated: bool = False  # stopped early after a numerical failure
+    push: dict | None = None  # PushScenario.describe() for the episode
 
     @property
     def n_ticks(self) -> int:
@@ -108,14 +117,18 @@ class EpisodeRunner:
         ids: ResolvedIds,
         policy: Policy,
         actor: ActorLike,
+        criteria: WalkCriteria | None = None,
     ) -> None:
         self.model = model
         self.ids = ids
         self.policy = policy
         self.actor = actor
+        self.criteria = criteria or WalkCriteria()
         self.data = mujoco.MjData(model)
         self.builder = ObservationBuilder(model, ids, policy)
+        self.monitor = FallMonitor(model, ids, self.criteria.tilt_deg, self.criteria.min_trunk_z)
         self.n_substeps = policy.n_substeps
+        self.sim_dt = float(model.opt.timestep)
         self.default_pose = policy.default_pose
         self.action_scale = np.float32(policy.action_scale)
         self.command = np.zeros(3, np.float32)
@@ -125,10 +138,21 @@ class EpisodeRunner:
         self._target = np.empty(model.nu, np.float32)
         self._feet = np.asarray(ids.foot_geoms)
         self._floor = ids.floor_geom
+        self._trunk = ids.trunk_body
+        # Push state for the current episode; an empty window [0, 0) means no push.
+        self.substep = 0
+        self.push: PushScenario | None = None
+        self.push_force = np.zeros(3)
+        self.push_window = (0, 0)
+        self.initial_yaw = 0.0
+        self.tick_impulse = np.zeros(3)
+        self.tick_nonfoot = False
 
-    def reset(self, command: tuple[float, float, float]) -> np.ndarray:
+    def reset(
+        self, command: tuple[float, float, float], push: PushScenario | None = None
+    ) -> np.ndarray:
         model, data = self.model, self.data
-        mujoco.mj_resetData(model, data)
+        mujoco.mj_resetData(model, data)  # also zeros xfrc_applied
         data.qpos[:] = self.policy.default_qpos
         data.qvel[:] = self.policy.default_qvel
         data.ctrl[:] = data.qpos[7:]
@@ -136,18 +160,40 @@ class EpisodeRunner:
         self.last_action[:] = 0
         self.obs_last_action[:] = 0
         mujoco.mj_forward(model, data)
+        self.substep = 0
+        self.monitor.reset()
+        self.initial_yaw = float(yaw_from_quat(data.qpos[3:7]))
+        self.push = push
+        if push is None:
+            self.push_force = np.zeros(3)
+            self.push_window = (0, 0)
+        else:
+            if not math.isclose(push.sim_dt, self.sim_dt, rel_tol=0, abs_tol=1e-12):
+                raise ValueError(f"push sim_dt {push.sim_dt} != model timestep {self.sim_dt}")
+            self.push_force = push.world_force(self.initial_yaw)
+            self.push_window = push.window()
         return self.builder.build(data, self.obs_last_action, self.command, self.obs)
 
     def tick(self) -> np.ndarray:
         """Run one control period from the current observation; returns the applied action
         (an internal buffer of the actor, copied by callers that keep it)."""
-        data = self.data
+        model, data = self.model, self.data
         action = self.actor.act(self.obs)
         np.multiply(self.action_scale, action, out=self._target, dtype=np.float32)
         np.add(self.default_pose, self._target, out=self._target)
-        data.xfrc_applied[:] = 0
         data.ctrl[:] = self._target
-        mujoco.mj_step(self.model, data, nstep=self.n_substeps)
+        first, end = self.push_window
+        self.tick_impulse[:] = 0
+        self.tick_nonfoot = False
+        for _ in range(self.n_substeps):
+            data.xfrc_applied[:] = 0
+            if first <= self.substep < end:
+                data.xfrc_applied[self._trunk, :3] = self.push_force
+                self.tick_impulse += self.push_force * self.sim_dt
+            mujoco.mj_step(model, data)
+            self.substep += 1
+            if self.monitor.check(data, self.substep):
+                self.tick_nonfoot = True
         self.obs_last_action[:] = self.last_action
         self.builder.build(data, self.obs_last_action, self.command, self.obs)
         self.last_action[:] = action
@@ -173,6 +219,10 @@ class EpisodeRunner:
         n_ticks = round(config.seconds / ctrl_dt)
         if n_ticks < 1 or not math.isclose(n_ticks * ctrl_dt, config.seconds, abs_tol=1e-9):
             raise ValueError(f"seconds must be a positive multiple of {ctrl_dt}")
+        if config.push is not None and config.push.end_s > config.seconds + 1e-9:
+            raise ValueError(
+                f"push ends at {config.push.end_s:g} s, after the {config.seconds:g} s horizon"
+            )
         model, data = self.model, self.data
         rec = EpisodeRecord(
             ctrl_dt=ctrl_dt,
@@ -191,11 +241,14 @@ class EpisodeRunner:
             finite=np.empty(n_ticks, bool),
             warning_total=np.empty(n_ticks, np.int64),
             tick_ns=np.empty(n_ticks, np.int64),
+            nonfoot_contact=np.zeros(n_ticks, bool),
+            push_impulse=np.zeros((n_ticks, 3)),
         )
-        self.reset(config.command)
+        self.reset(config.command, config.push)
         rec.initial_qpos[:] = data.qpos
         rec.initial_qvel[:] = data.qvel
         clock = time.perf_counter_ns
+        done = n_ticks
         for k in range(n_ticks):
             start = clock()
             action = self.tick()
@@ -208,6 +261,23 @@ class EpisodeRunner:
             rec.command[k] = self.command
             self.foot_contacts(rec.contact[k])
             rec.warning_total[k] = self.warning_total()
+            rec.nonfoot_contact[k] = self.tick_nonfoot
+            rec.push_impulse[k] = self.tick_impulse
+            if self.monitor.numerical_failure:
+                done = k + 1
+                break
+        if done < n_ticks:
+            rec.truncated = True
+            for name in (
+                "time", "qpos", "qvel", "action", "command", "contact", "warning_total",
+                "tick_ns", "nonfoot_contact", "push_impulse",
+            ):  # fmt: skip
+                setattr(rec, name, getattr(rec, name)[:done].copy())
+            rec.up_z = rec.up_z[:done].copy()
+            rec.trunk_z = rec.trunk_z[:done].copy()
+            rec.finite = rec.finite[:done].copy()
+        rec.fall = self.monitor.result()
+        rec.push = None if config.push is None else config.push.describe(self.initial_yaw)
         rec.up_z[:] = up_z_from_quat(rec.qpos[:, 3:7])
         rec.trunk_z[:] = rec.qpos[:, 2]
         rec.finite[:] = (
@@ -236,18 +306,17 @@ def upright_checks(
     Non-finite `up_z` or `trunk_z` values compare False, so they also fail the predicate."""
     cos_tilt = math.cos(math.radians(criteria.tilt_deg))
     cos_compare = math.cos(math.radians(criteria.tilt_compare_deg))
-    with np.errstate(invalid="ignore"):
-        tilt_ok = up_z >= cos_tilt
-        height_ok = trunk_z >= criteria.min_trunk_z
-        compare_ok = up_z >= cos_compare
+    tilt_fine = tilt_ok(up_z, cos_tilt)
+    height_fine = height_ok(trunk_z, criteria.min_trunk_z)
+    compare_ok = tilt_ok(up_z, cos_compare)
     warnings_ok = warning_total == 0
-    tick_ok = tilt_ok & height_ok & finite & warnings_ok
+    tick_ok = tilt_fine & height_fine & finite & warnings_ok
     bad = np.flatnonzero(~tick_ok)
     return {
         "upright_45": bool(tick_ok.all()),
         "upright_60": bool(compare_ok.all()),
-        "tilt_ok": bool(tilt_ok.all()),
-        "height_ok": bool(height_ok.all()),
+        "tilt_ok": bool(tilt_fine.all()),
+        "height_ok": bool(height_fine.all()),
         "finite": bool(finite.all()),
         "warnings_ok": bool(warnings_ok.all()),
         "first_violation_time": float(time_s[bad[0]]) if bad.size else None,
@@ -328,13 +397,19 @@ def evaluate(record: EpisodeRecord, criteria: WalkCriteria = WalkCriteria()) -> 
         criteria,
     )
     outcome["warnings"] = dict(record.warnings)
+    fall = record.fall
+    if fall is not None:
+        outcome["fall"] = fall.to_dict()
+        outcome["truncated"] = record.truncated
 
-    # Progress metrics use the trajectory up to the last Tick before the first violation, so
-    # motion after a fall or a non-finite state is never credited.
+    # Progress metrics use the trajectory up to the last Tick before the first violation (the
+    # earlier of the per-Tick check and the substep FallResult), so motion after a fall or a
+    # non-finite state is never credited.
+    cutoff = [t for t in (outcome["first_violation_time"], fall and fall.time_s) if t is not None]
     last = record.n_ticks - 1
-    if outcome["first_violation_time"] is not None:
-        last = int(np.flatnonzero(record.time >= outcome["first_violation_time"] - _TIME_EPS)[0])
-        last -= 1
+    if cutoff:
+        later = np.flatnonzero(record.time >= min(cutoff) - _TIME_EPS)
+        last = (int(later[0]) if later.size else record.n_ticks) - 1
     start_xy = record.initial_qpos[0:2]
     yaw0 = float(yaw_from_quat(record.initial_qpos[3:7]))
     heading0 = np.array([math.cos(yaw0), math.sin(yaw0)])
@@ -359,19 +434,25 @@ def evaluate(record: EpisodeRecord, criteria: WalkCriteria = WalkCriteria()) -> 
 
     w0, w1 = criteria.window_start_s, criteria.window_end_s
     outcome["window_s"] = [w0, w1]
-    outcome["mean_forward_speed"] = mean_forward_speed(record.time, record.qpos, w0, w1)
+    upto = slice(0, max(last, -1) + 1)  # window metrics also stop at the last valid Tick
+    t_valid, q_valid, c_valid = record.time[upto], record.qpos[upto], record.contact[upto]
+    outcome["mean_forward_speed"] = mean_forward_speed(t_valid, q_valid, w0, w1)
     outcome["mean_speed"] = (
         outcome["forward_distance_m"] / outcome["progress_until_s"]
         if outcome["progress_until_s"] > 0
         else 0.0
     )
-    outcome["touchdowns"] = touchdowns(record.time, record.contact, w0, w1)
-    outcome["duty_factor"] = duty_factor(record.time, record.contact, w0, w1)
+    outcome["touchdowns"] = touchdowns(t_valid, c_valid, w0, w1)
+    outcome["duty_factor"] = duty_factor(t_valid, c_valid, w0, w1)
 
     horizon_s = float(record.n_ticks * record.ctrl_dt)
     criteria_set = criteria_set_for(record.command[0], horizon_s, criteria)
     outcome["criteria_set"] = criteria_set
     failed = [] if outcome["upright_45"] else ["upright_45"]
+    if fall is not None and fall.fell:
+        failed.append("fall")
+    if fall is not None and fall.numerical_failure:
+        failed.append("numerical_failure")
     if criteria_set == "forward":
         speed = outcome["mean_forward_speed"]
         if speed is None or speed < criteria.min_forward_speed:

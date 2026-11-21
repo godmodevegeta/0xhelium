@@ -30,6 +30,16 @@ def policy():
     return load_policy(POLICY_PATH, locked_sha256(REPO_ROOT, "policies/go1-walk-s0.json"))
 
 
+def build_model(policy, scene: str):
+    """Compiled scene with the policy's model parameters applied, and its resolved IDs."""
+    from robustlab.physics.model import apply_model_parameters, resolve_ids
+    from robustlab.physics.scene import build_scene
+
+    model = build_scene(MODEL_XML, scene).model
+    apply_model_parameters(model, policy.model_parameters)
+    return model, resolve_ids(model)
+
+
 @pytest.fixture(scope="session")
 def oracle():
     """weeble eval/sim.py loaded by file path, so it is never importable as a package module."""

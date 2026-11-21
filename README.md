@@ -3,11 +3,13 @@
 A CPU-first simulation robustness prototype for legged robots. Milestone M0 runs an existing
 pretrained Go1 walking policy in native MuJoCo and records a trajectory with a run manifest.
 
-Status: M0 complete, awaiting review. Every command below was run, and its observed output is in
-`docs/milestones/M0.md`. The pretrained policy (`go1-walk-s0` from
-[weeble](https://github.com/mottopanikeiku/weeble)) passed the fixed walking criteria: a 10 s forward
-run at 0.944 m/s mean over 2–10 s, and a zero-command run that stayed within 0.016 m. Results come
-from a flat-ground simulation only; no robustness or real-robot claim is made.
+Status: M0 approved; M1 (timed shove + fall detection) implemented, awaiting review. Every command
+below was run, and its observed output is in `docs/milestones/M0.md` and `docs/milestones/M1.md`.
+The pretrained policy (`go1-walk-s0` from [weeble](https://github.com/mottopanikeiku/weeble)) passed
+the fixed walking criteria: a 10 s forward run at 0.944 m/s mean over 2–10 s, and a zero-command run
+that stayed within 0.016 m. Under a 100 N sideways shove for 0.1 s at t = 2 s it falls (tilt past
+45° at 2.504 s). Results come from a flat-ground simulation only; no robustness or real-robot claim
+is made.
 
 ## Setup
 
@@ -47,6 +49,24 @@ uv run robustlab walk --policy policies/go1-walk-s0.json --command 1,0,0 --secon
     --out runs/m0/latency          # latency benchmark: 50 warm-up + 2,500 measured ticks
 ```
 
+M1 experiments: normal walking, and the same walk with a sideways shove on the trunk.
+
+```bash
+uv run robustlab walk --policy policies/go1-walk-s0.json --command 1,0,0 --seconds 5 \
+    --out runs/m1/nominal
+uv run robustlab walk --policy policies/go1-walk-s0.json --command 1,0,0 --seconds 5 \
+    --out runs/m1/shove-right-100N \
+    --push-force 100 --push-direction right --push-start 2.0 --push-duration 0.1
+```
+
+The push flags go together: force in N (0–150), direction in the robot's initial-heading frame
+(`forward`, `backward`, `left`, `right` or `x,y,z`; the name is where the force points, so `right`
+is a shove from the robot's left), start and duration in seconds (multiples of 0.004 s, duration
+≤ 0.5 s). `--scene fall-contact` (default) lets the trunk, hips, thighs and knees touch the floor;
+`--scene feet-only` runs the pinned M0 `walk.xml` unchanged. The summary prints whether the robot
+fell, the first reason (`nonfoot_contact`, `tilt`, `low_height`) and its time, and reports
+numerical failures (`nonfinite_state`, `mujoco_warning`) separately.
+
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and
 `manifest.json` into the `--out` directory. It refuses to replace an existing run unless
 `--overwrite` is given. Commands are body-frame `vx,vy,yaw` (m/s, m/s, rad/s) within the policy's
@@ -62,6 +82,8 @@ committed; `scripts/fetch_assets.py` re-downloads them from the pinned weeble co
 - `docs/kiro_build_log.md` — Kiro tasks mapped to observed commands and results
 - `docs/milestones/M0.md` — M0 evidence: hashes, criteria, measured values, parity, latency,
   limitations
+- `.kiro/specs/fall-detection/` — M1 requirements, design and tasks
+- `docs/milestones/M1.md` — M1 evidence: shove and fall results, scene comparison with M0, tests
 - `docs/decision-log/` — architecture decision records
 
 ## License
