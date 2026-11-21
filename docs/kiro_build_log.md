@@ -88,3 +88,39 @@ Hooks load at the next session start.
 Commands run by hand when the hooks were created: ruff printed `All checks passed!` and
 `5 files already formatted` (exit 0). pytest exited 5 (no tests collected) because `tests/` does
 not exist until task 2.6. Kiro treats that exit code as a silent, non-blocking failure.
+
+## M0 Tasks 3–7 — Assets, policy, control loop, verification, evidence
+
+Spec: `.kiro/specs/m0-walking-go1/`. Every row lists the commit and the test or command that was
+run against it. Measured results are in `docs/milestones/M0.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| 3.2 | Pinned assets, policy, lock and `THIRD_PARTY_NOTICES.md` | `6023503` | Hashes of all 10 files equal the lock |
+| 3.3 | `robustlab.assets`, `robustlab verify-assets` | `615bb7a` | `verify-assets`: all 10 files OK, exit 0 |
+| 3.4 | `physics/model.py` | `ff7a1b1` | nq 19, nv 18, nu 12, dt 0.004; params change no array (diff 0.0) |
+| 3.5 | `tests/test_assets.py`, `tests/test_model.py` | `fb177b9` | Properties 1–2 pass (130 and 120 cases) |
+| 4.1 | `tests/reference/weeble_sim.py`, `tests/test_independence.py` | `7a7accc` | Oracle body byte-identical to upstream (SHA-256 `0002059b…`); `src/` imports nothing from `tests` |
+| 4.2, 4.3 | `policy/actor.py` (`load_policy`, `Actor`, `swish`) | `ab37410` | 1,000-observation spot check: max error 0 |
+| 4.4 | `tests/test_policy.py` | `078c35f` | Properties 3–4 pass |
+| 4.5 | `tests/test_actor_parity.py` | `a726b09` | Property 5: max error 0.0 (atol 1e-7) |
+| 5.1 | `policy/observation.py` | `a67e833` | Reset observation equals oracle exactly |
+| 5.2 | `experiments/walk.py` runner | `9893849` | 500 Ticks vs oracle: action, qpos, obs error 0 |
+| 5.3 | `experiments/trace.py` | `d808937` | Atomic write; files 0644 |
+| 5.4 | `robustlab walk` | `8970075` | Exit 0 on run; 3 on existing run; 2 on out-of-range command |
+| 5.5 | `tests/test_loop.py` | `c22ec36` | Properties 6–9 pass; subprocess walk loads no jax/brax/flax/torch |
+| 5.6 | `tests/test_integration_loop.py` | `48038b5` | 3 × 500-Tick parity (error 0), determinism |
+| 6.1 | Walking metrics in `evaluate` | `a526a66` | Forward 0.944 m/s, 18 touchdowns/foot; zero 0.016 m |
+| 6.2 | `tests/test_metrics.py` | `6b596f2` | Properties 10–11 pass; `latency_summary` example |
+| 6.3, 6.4 | `tests/test_integration_walk.py` | `02a73c5` | Forward and zero criteria pass; 2,500 measured Ticks |
+| 6.5 | (optional) tracking cross-check | — | Not run: reading the weeble clone's results was not permitted in this session |
+| 6.6 | `scripts/render_final_pose.py` | `a80fe9a` | `mujoco.Renderer` worked; PNG written, not skipped |
+| 7.1 | Full validation | `8dd5750` | ruff clean; `pytest -q` 46 passed; `-m integration` 7 passed |
+| 7.2 | `docs/milestones/M0.md` | `19d09af` | Evidence document |
+
+Scope check at the end of M0: `src/robustlab/` contains only `assets`, `cli`, `physics/model`,
+`policy/{actor,observation}` and `experiments/{walk,trace}`. No UI, scenario schema, LLM adapter,
+optimizer, adapter, push perturbation or later-milestone stubs exist.
+
+Environment note carried through all tasks: commands ran as `UV_PYTHON_DOWNLOADS=never uv run
+--frozen …` against the local Python 3.12.2 in `.venv`.
