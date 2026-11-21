@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Ruff lint and format check",
+      "trigger": "PostFileSave",
+      "description": "On save of src/**/*.py or tests/**/*.py, run ruff lint and format check against the locked environment. CPU-only; no GPU or network work.",
+      "matcher": "(^|/)(src|tests)/.*\\.py$",
+      "action": {
+        "type": "command",
+        "command": "uv run --frozen ruff check . && uv run --frozen ruff format --check .",
+        "timeout": 60
+      }
+    }
+  ]
+}

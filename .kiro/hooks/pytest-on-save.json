@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Fast pytest suite",
+      "trigger": "PostFileSave",
+      "description": "On save of src/**/*.py or tests/**/*.py, run the default pytest suite. pyproject addopts deselects -m integration, so no rollouts, GPU or network calls run.",
+      "matcher": "(^|/)(src|tests)/.*\\.py$",
+      "action": {
+        "type": "command",
+        "command": "uv run --frozen pytest -q",
+        "timeout": 120
+      }
+    }
+  ]
+}
