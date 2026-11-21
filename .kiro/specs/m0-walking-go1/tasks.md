@@ -149,22 +149,22 @@ M1+ (no UI, schema, LLM, optimizer, adapter, push, or module stubs).
   - **Exit/demo:** `uv run pytest -q && uv run pytest -q -m integration && uv run robustlab walk
     --policy policies/go1-walk-s0.json --command 1,0,0 --seconds 10 --out runs/m0/forward`
 
-- [ ] 6. Walking verification, latency and optional render
-  - [ ] 6.1 Extend `evaluate` with the walking metrics
+- [x] 6. Walking verification, latency and optional render
+  - [x] 6.1 Extend `evaluate` with the walking metrics
     - Mean body-frame forward speed over 2–10 s, touchdowns and duty factor per foot, distance, yaw
       drift, horizontal displacement; `passed` and `failed_checks`; criteria constants written to the
       manifest
     - _Requirements: 10.3, 10.4, 10.5, 10.6_
-  - [ ] 6.2 Write metric property tests
+  - [x] 6.2 Write metric property tests
     - Property 10: Forward speed is heading-invariant — **Validates: Requirements 10.3**
     - Property 11: Touchdown counting — **Validates: Requirements 10.4**
     - _Requirements: 10.3, 10.4_
-  - [ ] 6.3 Write the walking integration test (`-m integration`)
+  - [x] 6.3 Write the walking integration test (`-m integration`)
     - Forward_Episode (1.0, 0, 0), 10 s: upright (45°), trunk z ≥ 0.18 m, finite, no warnings, mean
       forward speed ≥ 0.7 m/s, ≥ 5 touchdowns per foot in 2–10 s
     - Zero_Episode (0, 0, 0), 10 s: upright and horizontal displacement < 0.3 m
     - _Requirements: 10.1, 10.3, 10.4, 10.5_
-  - [ ] 6.4 Measure latency
+  - [x] 6.4 Measure latency
     - `latency_summary` example test on a known array; run a ≥ 51 s episode so 50 warm-up Ticks are
       dropped and ≥ 2,500 are measured; report median, p95, max vs 25 ms target, real-time factor,
       load time and JSON-write time
@@ -173,7 +173,7 @@ M1+ (no UI, schema, LLM, optimizer, adapter, push, or module stubs).
     - Run (1.5, 0, 0) and compare forward-speed error to weeble's tracking table for go1-walk-s0;
       comparison only, not a pass/fail criterion
     - _Requirements: 10.6_
-  - [ ]* 6.6 Render a PNG with `mujoco.Renderer`
+  - [x]* 6.6 Render a PNG with `mujoco.Renderer`
     - Outside any timed loop; if macOS offscreen OpenGL raises any error or friction, skip with no
       retries or workarounds and record the skip in `docs/milestones/M0.md`
     - _Requirements: 13.1_
