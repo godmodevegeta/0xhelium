@@ -1,0 +1,302 @@
+"""Closed-loop episode runner for the pretrained Go1 walking policy, and its outcome evaluation.
+
+One Tick (control period 0.02 s):
+
+1. `action = actor.act(obs_t)`
+2. `xfrc_applied = 0`; `ctrl = default_pose + 0.5 * action` (float32 arithmetic, no clipping;
+   MuJoCo's actuator ctrlrange still applies)
+3. `mj_step(model, data, nstep=5)` with that ctrl held for all 5 substeps
+4. `obs_last_action = last_action`; `last_action = action`
+5. `obs_{t+1} = build(data, obs_last_action, command)` without `mj_forward`
+
+So observation `o[t+1]` carries action `a[t-1]`, as in training. Nothing in an episode is random;
+`seed` is recorded in the manifest for later milestones but does not change M0 results.
+"""
+
+from __future__ import annotations
+
+import math
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Protocol
+
+import mujoco
+import numpy as np
+
+from robustlab.physics.model import ResolvedIds
+from robustlab.policy.actor import Policy
+from robustlab.policy.observation import ObservationBuilder
+
+WARNING_NAMES = tuple(
+    name.removeprefix("mjWARN_") for name in mujoco.mjtWarning.__members__ if name != "mjNWARNING"
+)
+
+
+class ActorLike(Protocol):
+    def act(self, obs: np.ndarray) -> np.ndarray: ...
+
+
+@dataclass(frozen=True)
+class EpisodeConfig:
+    command: tuple[float, float, float]
+    seconds: float
+    seed: int = 0
+
+
+@dataclass(frozen=True)
+class WalkCriteria:
+    """Walking criteria fixed before any M0 run (Requirement 10). Written to every manifest."""
+
+    tilt_deg: float = 45.0
+    tilt_compare_deg: float = 60.0
+    min_trunk_z: float = 0.18
+    window_start_s: float = 2.0
+    window_end_s: float = 10.0
+    min_forward_speed: float = 0.7
+    min_touchdowns: int = 5
+    zero_cmd_max_disp: float = 0.3
+    forward_command: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    zero_command: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+
+@dataclass
+class EpisodeRecord:
+    """Per-Tick arrays, row k is the state after Tick k (time = (k + 1) * ctrl_dt)."""
+
+    ctrl_dt: float
+    sim_dt: float
+    n_substeps: int
+    initial_qpos: np.ndarray
+    initial_qvel: np.ndarray
+    time: np.ndarray  # [T]
+    qpos: np.ndarray  # [T, 19]
+    qvel: np.ndarray  # [T, 18]
+    action: np.ndarray  # [T, 12] action applied during Tick k
+    command: np.ndarray  # [T, 3]
+    contact: np.ndarray  # [T, 4] bool, foot-floor contact in FR, FL, RR, RL order
+    up_z: np.ndarray  # [T]
+    trunk_z: np.ndarray  # [T]
+    finite: np.ndarray  # [T] bool, qpos, qvel and action all finite
+    warning_total: np.ndarray  # [T] cumulative MuJoCo warning count
+    tick_ns: np.ndarray  # [T] wall time of each Tick
+    warnings: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def n_ticks(self) -> int:
+        return int(self.time.size)
+
+
+def up_z_from_quat(quat: np.ndarray) -> np.ndarray:
+    """World z component of the body z axis for wxyz quaternion(s): 1 - 2(x^2 + y^2)."""
+    quat = np.asarray(quat, dtype=np.float64)
+    norm2 = np.sum(quat * quat, axis=-1)
+    return 1.0 - 2.0 * (quat[..., 1] ** 2 + quat[..., 2] ** 2) / norm2
+
+
+def yaw_from_quat(quat: np.ndarray) -> np.ndarray:
+    quat = np.asarray(quat, dtype=np.float64)
+    w, x, y, z = (quat[..., i] for i in range(4))
+    return np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+
+class EpisodeRunner:
+    """Owns one MjData and runs Ticks of the policy on it."""
+
+    def __init__(
+        self,
+        model: mujoco.MjModel,
+        ids: ResolvedIds,
+        policy: Policy,
+        actor: ActorLike,
+    ) -> None:
+        self.model = model
+        self.ids = ids
+        self.policy = policy
+        self.actor = actor
+        self.data = mujoco.MjData(model)
+        self.builder = ObservationBuilder(model, ids, policy)
+        self.n_substeps = policy.n_substeps
+        self.default_pose = policy.default_pose
+        self.action_scale = np.float32(policy.action_scale)
+        self.command = np.zeros(3, np.float32)
+        self.last_action = np.zeros(model.nu, np.float32)
+        self.obs_last_action = np.zeros(model.nu, np.float32)
+        self.obs = np.zeros(policy.obs_dim, np.float32)
+        self._target = np.empty(model.nu, np.float32)
+        self._feet = np.asarray(ids.foot_geoms)
+        self._floor = ids.floor_geom
+
+    def reset(self, command: tuple[float, float, float]) -> np.ndarray:
+        model, data = self.model, self.data
+        mujoco.mj_resetData(model, data)
+        data.qpos[:] = self.policy.default_qpos
+        data.qvel[:] = self.policy.default_qvel
+        data.ctrl[:] = data.qpos[7:]
+        self.command[:] = command
+        self.last_action[:] = 0
+        self.obs_last_action[:] = 0
+        mujoco.mj_forward(model, data)
+        return self.builder.build(data, self.obs_last_action, self.command, self.obs)
+
+    def tick(self) -> np.ndarray:
+        """Run one control period from the current observation; returns the applied action
+        (an internal buffer of the actor, copied by callers that keep it)."""
+        data = self.data
+        action = self.actor.act(self.obs)
+        np.multiply(self.action_scale, action, out=self._target, dtype=np.float32)
+        np.add(self.default_pose, self._target, out=self._target)
+        data.xfrc_applied[:] = 0
+        data.ctrl[:] = self._target
+        mujoco.mj_step(self.model, data, nstep=self.n_substeps)
+        self.obs_last_action[:] = self.last_action
+        self.builder.build(data, self.obs_last_action, self.command, self.obs)
+        self.last_action[:] = action
+        return action
+
+    def foot_contacts(self, out: np.ndarray) -> np.ndarray:
+        """Foot-floor contact flags from the contacts of the last substep."""
+        out[:] = False
+        geoms = self.data.contact.geom[: self.data.ncon]
+        if geoms.size:
+            for i, foot in enumerate(self._feet):
+                pair = ((geoms[:, 0] == foot) & (geoms[:, 1] == self._floor)) | (
+                    (geoms[:, 1] == foot) & (geoms[:, 0] == self._floor)
+                )
+                out[i] = bool(pair.any())
+        return out
+
+    def warning_total(self) -> int:
+        return int(sum(self.data.warning[i].number for i in range(len(WARNING_NAMES))))
+
+    def run(self, config: EpisodeConfig) -> EpisodeRecord:
+        ctrl_dt = self.policy.control_dt
+        n_ticks = round(config.seconds / ctrl_dt)
+        if n_ticks < 1 or not math.isclose(n_ticks * ctrl_dt, config.seconds, abs_tol=1e-9):
+            raise ValueError(f"seconds must be a positive multiple of {ctrl_dt}")
+        model, data = self.model, self.data
+        rec = EpisodeRecord(
+            ctrl_dt=ctrl_dt,
+            sim_dt=float(model.opt.timestep),
+            n_substeps=self.n_substeps,
+            initial_qpos=np.empty(model.nq),
+            initial_qvel=np.empty(model.nv),
+            time=np.empty(n_ticks),
+            qpos=np.empty((n_ticks, model.nq)),
+            qvel=np.empty((n_ticks, model.nv)),
+            action=np.empty((n_ticks, model.nu), np.float32),
+            command=np.empty((n_ticks, 3), np.float32),
+            contact=np.zeros((n_ticks, 4), bool),
+            up_z=np.empty(n_ticks),
+            trunk_z=np.empty(n_ticks),
+            finite=np.empty(n_ticks, bool),
+            warning_total=np.empty(n_ticks, np.int64),
+            tick_ns=np.empty(n_ticks, np.int64),
+        )
+        self.reset(config.command)
+        rec.initial_qpos[:] = data.qpos
+        rec.initial_qvel[:] = data.qvel
+        clock = time.perf_counter_ns
+        for k in range(n_ticks):
+            start = clock()
+            action = self.tick()
+            rec.tick_ns[k] = clock() - start
+            # Recording is outside the timed region.
+            rec.time[k] = data.time
+            rec.qpos[k] = data.qpos
+            rec.qvel[k] = data.qvel
+            rec.action[k] = action
+            rec.command[k] = self.command
+            self.foot_contacts(rec.contact[k])
+            rec.warning_total[k] = self.warning_total()
+        rec.up_z[:] = up_z_from_quat(rec.qpos[:, 3:7])
+        rec.trunk_z[:] = rec.qpos[:, 2]
+        rec.finite[:] = (
+            np.isfinite(rec.qpos).all(axis=1)
+            & np.isfinite(rec.qvel).all(axis=1)
+            & np.isfinite(rec.action).all(axis=1)
+        )
+        rec.warnings = {
+            name: int(data.warning[i].number)
+            for i, name in enumerate(WARNING_NAMES)
+            if data.warning[i].number
+        }
+        return rec
+
+
+def upright_checks(
+    up_z: np.ndarray,
+    trunk_z: np.ndarray,
+    finite: np.ndarray,
+    warning_total: np.ndarray,
+    time_s: np.ndarray,
+    criteria: WalkCriteria,
+) -> dict:
+    """The upright predicate (Requirement 10.1) and the 60-degree comparison (10.2).
+
+    Non-finite `up_z` or `trunk_z` values compare False, so they also fail the predicate."""
+    cos_tilt = math.cos(math.radians(criteria.tilt_deg))
+    cos_compare = math.cos(math.radians(criteria.tilt_compare_deg))
+    with np.errstate(invalid="ignore"):
+        tilt_ok = up_z >= cos_tilt
+        height_ok = trunk_z >= criteria.min_trunk_z
+        compare_ok = up_z >= cos_compare
+    warnings_ok = warning_total == 0
+    tick_ok = tilt_ok & height_ok & finite & warnings_ok
+    bad = np.flatnonzero(~tick_ok)
+    return {
+        "upright_45": bool(tick_ok.all()),
+        "upright_60": bool(compare_ok.all()),
+        "tilt_ok": bool(tilt_ok.all()),
+        "height_ok": bool(height_ok.all()),
+        "finite": bool(finite.all()),
+        "warnings_ok": bool(warnings_ok.all()),
+        "first_violation_time": float(time_s[bad[0]]) if bad.size else None,
+        "min_up_z": float(np.min(up_z)) if up_z.size else None,
+        "max_tilt_deg": float(np.degrees(np.arccos(np.clip(np.min(up_z), -1, 1))))
+        if up_z.size
+        else None,
+        "min_trunk_z": float(np.min(trunk_z)) if trunk_z.size else None,
+    }
+
+
+def evaluate(record: EpisodeRecord, criteria: WalkCriteria = WalkCriteria()) -> dict:
+    """Outcome of one episode against the fixed criteria."""
+    outcome = upright_checks(
+        record.up_z,
+        record.trunk_z,
+        record.finite,
+        record.warning_total,
+        record.time,
+        criteria,
+    )
+    failed = [] if outcome["upright_45"] else ["upright_45"]
+    outcome["warnings"] = dict(record.warnings)
+    outcome["passed"] = not failed
+    outcome["failed_checks"] = failed
+    return outcome
+
+
+def latency_summary(tick_ns: np.ndarray, ctrl_dt: float, warmup: int = 50) -> dict:
+    """Tick latency statistics after discarding `warmup` Ticks, against a 25 ms target."""
+    target_ms = 25.0
+    measured = np.asarray(tick_ns[warmup:], dtype=np.float64) / 1e6
+    if measured.size == 0:
+        return {"warmup_ticks": warmup, "measured_ticks": 0, "target_ms": target_ms}
+    total_s = measured.sum() / 1e3
+    return {
+        "warmup_ticks": warmup,
+        "measured_ticks": int(measured.size),
+        "median_ms": float(np.median(measured)),
+        "p95_ms": float(np.percentile(measured, 95)),
+        "max_ms": float(measured.max()),
+        "mean_ms": float(measured.mean()),
+        "target_ms": target_ms,
+        "median_within_target": bool(np.median(measured) <= target_ms),
+        "p95_within_target": bool(np.percentile(measured, 95) <= target_ms),
+        "max_within_target": bool(measured.max() <= target_ms),
+        "real_time_factor": float(measured.size * ctrl_dt / total_s) if total_s > 0 else None,
+    }
+
+
+def criteria_dict(criteria: WalkCriteria) -> dict:
+    return asdict(criteria)
