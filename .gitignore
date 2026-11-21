@@ -1,0 +1,12 @@
+# Generated experiment evidence
+runs/
+
+# Python environment and caches
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# OS files
+.DS_Store

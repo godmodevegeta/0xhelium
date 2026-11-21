@@ -1,0 +1,278 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Resolve and clone the pinned weeble commit": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255538855
+      },
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255579377
+      },
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255684865
+      }
+    ],
+    "1.2 Run the upstream 10 s forward rollout": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255538886
+      },
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255685451
+      },
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795256480718
+      }
+    ],
+    "1.3 Record the go/no-go result and apply the stop-loss": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255538908
+      },
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795256481235
+      },
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795256548350
+      }
+    ],
+    "2.1 Initialize git and repository hygiene files": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255538930
+      },
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795256563476
+      }
+    ],
+    "2.2 Create `pyproject.toml` and lockfile": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255538959
+      }
+    ],
+    "2.3 Implement `src/robustlab/__init__.py` and `src/robustlab/cli.py` with `doctor`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255538980
+      }
+    ],
+    "2.4 Add documentation scaffolding": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255538996
+      }
+    ],
+    "2.5 Kiro hooks for ruff and pytest": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539013
+      }
+    ],
+    "2.6 Write skeleton tests": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539032
+      }
+    ],
+    "3.1 Implement `scripts/fetch_assets.py`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539057
+      }
+    ],
+    "3.2 Fetch, commit pinned files and write `THIRD_PARTY_NOTICES.md`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539087
+      }
+    ],
+    "3.3 Implement asset verification and `robustlab verify-assets`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539104
+      }
+    ],
+    "3.4 Implement `src/robustlab/physics/model.py`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539120
+      }
+    ],
+    "3.5 Write model and asset tests": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539138
+      }
+    ],
+    "4.1 Add the test oracle": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539158
+      }
+    ],
+    "4.2 Implement `load_policy` in `src/robustlab/policy/actor.py`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539178
+      }
+    ],
+    "4.3 Implement `Actor` with stable swish": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539195
+      }
+    ],
+    "4.4 Write policy and actor unit/property tests": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539214
+      }
+    ],
+    "4.5 Write actor oracle-parity test": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539232
+      }
+    ],
+    "5.1 Implement `src/robustlab/policy/observation.py`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539251
+      }
+    ],
+    "5.2 Implement the episode runner in `src/robustlab/experiments/walk.py`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539271
+      }
+    ],
+    "5.3 Implement `src/robustlab/experiments/trace.py`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539307
+      }
+    ],
+    "5.4 Add the `robustlab walk` subcommand": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539328
+      }
+    ],
+    "5.5 Write loop and trace unit/property tests": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539347
+      }
+    ],
+    "5.6 Write closed-loop integration tests (`-m integration`)": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539366
+      }
+    ],
+    "6.1 Extend `evaluate` with the walking metrics": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539388
+      }
+    ],
+    "6.2 Write metric property tests": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539410
+      }
+    ],
+    "6.3 Write the walking integration test (`-m integration`)": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539434
+      }
+    ],
+    "6.4 Measure latency": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539456
+      }
+    ],
+    "7.1 Run the full validation suite": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539476
+      }
+    ],
+    "7.2 Write `docs/milestones/M0.md`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539498
+      }
+    ],
+    "7.3 Update `docs/kiro_build_log.md` and `README.md`": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539522
+      }
+    ],
+    "7.4 Report and stop": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795255539544
+      }
+    ],
+    "1. Go/no-go spike on the upstream runner (30-minute time-box)": [
+      {
+        "executionId": "6dbbf53b-afca-411c-830a-8d453348a58b",
+        "chatSessionId": "sess_025e05cb-6276-4661-8692-8ee41fe76e15",
+        "timestamp": 1795256548370
+      }
+    ]
+  }
+}
