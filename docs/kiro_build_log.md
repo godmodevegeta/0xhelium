@@ -45,3 +45,27 @@ criteria in `requirements.md` are evaluated later by our own code (Tasks 5–7).
 **Carry-forward risk.** uv-managed Python downloads are unreliable on this network. Task 2.2 should
 use the local Python 3.12.2 (`--python /opt/homebrew/Caskroom/miniconda/base/bin/python3.12` with
 `UV_PYTHON_DOWNLOADS=never`) and document this in the README.
+
+## M0 Task 2 — Repository and package scaffold
+
+Spec: `.kiro/specs/m0-walking-go1/` (tasks 2.1–2.4).
+
+**2.1 — commit `4d308a4`.** Repository initialized with MIT `LICENSE`, `README.md` and `.gitignore`.
+
+**2.2 — commit `ce6bb42`.** `pyproject.toml`, `.python-version` and `uv.lock` added. Resolved in
+`uv.lock`: numpy 2.5.5, mujoco 3.15.0 (pinned `==3.15.0`), pytest 9.2.0, ruff 0.17.6. Ruff is
+configured with `extend-exclude = [".kiro"]` so linting covers project code only and skips the
+Kiro spec/steering directory.
+
+**2.3 — commit `3fdf22d`.** `robustlab` CLI with a `doctor` subcommand; NumPy and MuJoCo are
+imported lazily. Observed output of `uv run --no-sync python -m robustlab.cli doctor`:
+
+| Field | Observed |
+| --- | --- |
+| Python | 3.12.2 (project `.venv`) |
+| NumPy | 2.5.5 |
+| MuJoCo | 3.15.0 |
+| Platform | macOS 15.8.1, arm64 |
+| BLAS / LAPACK | accelerate |
+
+**2.4.** This section and ADR `docs/decision-log/0001-m0-policy-source.md` added.
