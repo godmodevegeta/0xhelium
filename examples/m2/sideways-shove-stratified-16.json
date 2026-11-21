@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "sideways-shove-stratified-16",
+  "description": "100 N toward the robot's right for 0.1 s while walking at 1 m/s; shove start drawn by stratified sampling over [2.000, 3.024) s (256 substeps, about 2.3 gait cycles of 0.44 s).",
+  "policy": "policies/go1-walk-s0.json",
+  "scene": "fall-contact",
+  "command": [1.0, 0.0, 0.0],
+  "horizon_s": 5.0,
+  "trials": 16,
+  "seed": 20261121,
+  "attack": {
+    "kind": "push",
+    "force_n": 100.0,
+    "direction": "right",
+    "duration_s": 0.1,
+    "start": {"method": "stratified", "low_s": 2.0, "high_s": 3.024}
+  }
+}

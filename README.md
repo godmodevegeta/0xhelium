@@ -3,13 +3,13 @@
 A CPU-first simulation robustness prototype for legged robots. Milestone M0 runs an existing
 pretrained Go1 walking policy in native MuJoCo and records a trajectory with a run manifest.
 
-Status: M0 approved; M1 (timed shove + fall detection) implemented, awaiting review. Every command
-below was run, and its observed output is in `docs/milestones/M0.md` and `docs/milestones/M1.md`.
+Status: M0 and M1 approved; M2 (reproducible experiment runner) implemented, awaiting review. Every
+command below was run, and its observed output is in `docs/milestones/M0.md`, `M1.md` and `M2.md`.
 The pretrained policy (`go1-walk-s0` from [weeble](https://github.com/mottopanikeiku/weeble)) passed
 the fixed walking criteria: a 10 s forward run at 0.944 m/s mean over 2–10 s, and a zero-command run
-that stayed within 0.016 m. Under a 100 N sideways shove for 0.1 s at t = 2 s it falls (tilt past
-45° at 2.504 s). Results come from a flat-ground simulation only; no robustness or real-robot claim
-is made.
+that stayed within 0.016 m. A 100 N shove toward its right for 0.1 s, started at each of the 256
+4 ms steps in [2.000, 3.024) s, made it fall in 11 of 256 cases (4.3%). Results come from a
+flat-ground simulation only; no general robustness or real-robot claim is made.
 
 ## Setup
 
@@ -67,6 +67,20 @@ is a shove from the robot's left), start and duration in seconds (multiples of 0
 fell, the first reason (`nonfoot_contact`, `tilt`, `low_height`) and its time, and reports
 numerical failures (`nonfinite_state`, `mujoco_warning`) separately.
 
+M2 experiment suite: paired nominal and shoved runs, varying only the shove start time.
+
+```bash
+uv run robustlab experiment --config examples/m2/sideways-shove-stratified-16.json \
+    --out runs/m2/stratified-16                  # 16 stratified random start times
+uv run robustlab experiment --config examples/m2/sideways-shove-grid-all-256.json \
+    --out runs/m2/grid-all-256                   # every 4 ms start time in the interval
+```
+
+`experiment` writes `experiment.json` (every trial's timing, outcome, fall reason and time, paired
+difference, aggregates with denominators, provenance, and what the numbers do and do not mean) and,
+for up to 32 trials, each trial's nominal and shoved trajectories in the `walk` format. Options:
+`--trials`, `--seed`, `--no-save-trajectories`, `--overwrite`, `--dry-run`.
+
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and
 `manifest.json` into the `--out` directory. It refuses to replace an existing run unless
 `--overwrite` is given. Commands are body-frame `vx,vy,yaw` (m/s, m/s, rad/s) within the policy's
@@ -84,6 +98,8 @@ committed; `scripts/fetch_assets.py` re-downloads them from the pinned weeble co
   limitations
 - `.kiro/specs/fall-detection/` — M1 requirements, design and tasks
 - `docs/milestones/M1.md` — M1 evidence: shove and fall results, scene comparison with M0, tests
+- `.kiro/specs/experiment-runner/` — M2 requirements, design and tasks
+- `docs/milestones/M2.md` — M2 evidence: paired suites, fall frequencies, what they establish
 - `docs/decision-log/` — architecture decision records
 
 ## License

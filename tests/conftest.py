@@ -8,6 +8,12 @@ import sys
 from pathlib import Path
 
 import pytest
+from hypothesis import settings
+
+# Property-based tests run derandomized and without an example database, so results do not
+# depend on earlier local runs.
+settings.register_profile("robustlab", derandomize=True, database=None, deadline=None)
+settings.load_profile("robustlab")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = REPO_ROOT / "policies" / "go1-walk-s0.json"
