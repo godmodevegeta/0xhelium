@@ -45,7 +45,6 @@ uv run robustlab walk --policy policies/go1-walk-s0.json --command 0,0,0 --secon
     --out runs/m0/zero             # zero command, stand in place
 uv run robustlab walk --policy policies/go1-walk-s0.json --command 1,0,0 --seconds 51 \
     --out runs/m0/latency          # latency benchmark: 50 warm-up + 2,500 measured ticks
-uv run python scripts/render_final_pose.py   # optional PNG of the forward run's final pose
 ```
 
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and

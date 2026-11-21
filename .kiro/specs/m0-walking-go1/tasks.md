@@ -169,13 +169,14 @@ M1+ (no UI, schema, LLM, optimizer, adapter, push, or module stubs).
       dropped and ≥ 2,500 are measured; report median, p95, max vs 25 ms target, real-time factor,
       load time and JSON-write time
     - _Requirements: 11.1, 11.2, 11.3_
-  - [ ]* 6.5 Cross-check tracking against weeble's committed table
+  - [x]* 6.5 Cross-check tracking against weeble's committed table
     - Run (1.5, 0, 0) and compare forward-speed error to weeble's tracking table for go1-walk-s0;
       comparison only, not a pass/fail criterion
     - _Requirements: 10.6_
-  - [x]* 6.6 Render a PNG with `mujoco.Renderer`
+  - [ ]* 6.6 Render a PNG with `mujoco.Renderer`
     - Outside any timed loop; if macOS offscreen OpenGL raises any error or friction, skip with no
       retries or workarounds and record the skip in `docs/milestones/M0.md`
+    - **Skipped by user decision:** rendering is deferred to the M3 web viewer
     - _Requirements: 13.1_
   - **Exit/demo:** `uv run pytest -q -m integration`, then `uv run robustlab walk --policy
     policies/go1-walk-s0.json --command 1,0,0 --seconds 10 --out runs/m0/forward`, `... --command

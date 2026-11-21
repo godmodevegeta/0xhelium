@@ -113,10 +113,11 @@ run against it. Measured results are in `docs/milestones/M0.md`.
 | 6.1 | Walking metrics in `evaluate` | `a526a66` | Forward 0.944 m/s, 18 touchdowns/foot; zero 0.016 m |
 | 6.2 | `tests/test_metrics.py` | `6b596f2` | Properties 10–11 pass; `latency_summary` example |
 | 6.3, 6.4 | `tests/test_integration_walk.py` | `02a73c5` | Forward and zero criteria pass; 2,500 measured Ticks |
-| 6.5 | (optional) tracking cross-check | — | Not run: reading the weeble clone's results was not permitted in this session |
-| 6.6 | `scripts/render_final_pose.py` | `a80fe9a` | `mujoco.Renderer` worked; PNG written, not skipped |
-| 7.1 | Full validation | `8dd5750` | ruff clean; `pytest -q` 46 passed; `-m integration` 7 passed |
-| 7.2 | `docs/milestones/M0.md` | `19d09af` | Evidence document |
+| 6.5 | (optional) tracking cross-check, `runs/m0/track-1.5` | final M0 commit | Run in 0.49 s; forward_mae 0.0530 vs weeble C MuJoCo 0.0571 m/s (comparison only) |
+| 6.6 | (optional) render | `a80fe9a`, removed in final M0 commit | Skipped by user decision; rendering deferred to the M3 web viewer |
+| 7.1 | Full validation | final M0 commit | ruff clean; `pytest -q` 46 passed; `-m integration` 7 passed |
+| 7.2 | `docs/milestones/M0.md` | `19d09af`, amended in final M0 commit | Evidence document |
+| — | `.kiro/hooks/milestone-verification.json` (Stop hook, fast suite, always exit 0) | final M0 commit | Command run by hand: 46 passed in 5.0 s, within its 30 s timeout |
 
 Scope check at the end of M0: `src/robustlab/` contains only `assets`, `cli`, `physics/model`,
 `policy/{actor,observation}` and `experiments/{walk,trace}`. No UI, scenario schema, LLM adapter,
