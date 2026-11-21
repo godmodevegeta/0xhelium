@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "robustlab-scenario",
+  "name": "payload-5kg-top",
+  "command": [
+    1.0,
+    0.0,
+    0.0
+  ],
+  "horizon_s": 5.0,
+  "scene": "fall-contact",
+  "environment": {
+    "ground_friction_mu": null
+  },
+  "payload": {
+    "mass_kg": 5.0,
+    "offset_xyz_m": [
+      0,
+      0,
+      0.05
+    ]
+  },
+  "push": null
+}

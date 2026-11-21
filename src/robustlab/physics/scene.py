@@ -9,6 +9,14 @@ lower shin capsule just above each foot (default class `calf2`) is left non-coll
 fast walking it dips a few millimetres below the floor in the feet-only scene the policy was trained
 in, and making it solid changed nominal walking (see `docs/decision-log/0002-m1-fall-contact-scene.md`).
 
+M5 adds two optional physical modifications, applied to the same in-memory spec:
+
+- `friction_mu`: the floor geom's sliding friction. The floor has contact priority 1 and the feet
+  priority 0, so MuJoCo resolves every floor contact to the floor's friction and condim; changing
+  the floor is what changes foot-ground friction. Torsional and rolling coefficients are unchanged.
+- `payload`: a uniform rigid box welded to the trunk (child body, no joint) with an explicit
+  inertial, plus a massless, non-colliding box geom (group 4) for display.
+
 The pinned XML file is never modified; the transform is applied in memory with `MjSpec`.
 """
 
@@ -16,12 +24,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import mujoco
+import numpy as np
 
-from robustlab.physics.model import FLOOR_GEOM, FOOT_GEOMS, load_model
+from robustlab.physics.model import FLOOR_GEOM, FOOT_GEOMS, TRUNK_BODY, load_model
 
 SCENE_FALL_CONTACT = "fall-contact"
 SCENE_FEET_ONLY = "feet-only"
@@ -30,9 +39,32 @@ SCENE_TRANSFORM_VERSION = 1
 COLLISION_GROUP = 3
 UNCHANGED_CLASSES = ("calf2",)
 
+PAYLOAD_MODEL_VERSION = 1
+PAYLOAD_BODY = "payload"
+PAYLOAD_GEOM = "payload_box"
+PAYLOAD_GROUP = 4
+PAYLOAD_BOX_SIZE_M = (0.10, 0.08, 0.04)  # full extents x, y, z (trunk axes)
+
 
 class SceneError(Exception):
     """The scene cannot be built from the given XML."""
+
+
+@dataclass(frozen=True)
+class Payload:
+    mass_kg: float
+    offset_xyz_m: tuple[float, float, float]  # from the trunk CoM, trunk body axes
+
+    @property
+    def half_size(self) -> tuple[float, float, float]:
+        return tuple(s / 2 for s in PAYLOAD_BOX_SIZE_M)  # type: ignore[return-value]
+
+    @property
+    def inertia_diag(self) -> tuple[float, float, float]:
+        """Uniform solid box about its own centre: m/12 (b^2+c^2, a^2+c^2, a^2+b^2)."""
+        a, b, c = PAYLOAD_BOX_SIZE_M
+        m = self.mass_kg
+        return (m / 12 * (b * b + c * c), m / 12 * (a * a + c * c), m / 12 * (a * a + b * b))
 
 
 @dataclass(frozen=True)
@@ -44,10 +76,11 @@ class SceneInfo:
     fall_geoms: tuple[dict, ...]  # {"geom_id", "body", "class"} made floor-collidable
     unchanged_geoms: tuple[dict, ...]  # non-foot collision geoms left non-colliding
     transform_sha256: str
+    modifications: dict = field(default_factory=dict)  # M5: friction / payload, empty if none
 
     def describe(self) -> dict:
         """JSON-ready description for manifests (no model object)."""
-        return {
+        out = {
             "name": self.name,
             "transform_version": self.transform_version,
             "base_xml_sha256": self.base_xml_sha256,
@@ -55,6 +88,9 @@ class SceneInfo:
             "unchanged_geoms": list(self.unchanged_geoms),
             "transform_sha256": self.transform_sha256,
         }
+        if self.modifications:  # absent for M0-M4 scenes, so their descriptions are unchanged
+            out["modifications"] = self.modifications
+        return out
 
 
 def _class_name(geom) -> str:
@@ -66,30 +102,90 @@ def _transform_sha256(payload: dict) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
-def build_scene(xml_path: Path, scene: str) -> SceneInfo:
-    """Compile `scene` from `xml_path`. Raises `SceneError` for an unknown scene name."""
+def _apply_fall_contact(spec) -> tuple[list[dict], list[dict]]:
+    fall_geoms: list[dict] = []
+    unchanged: list[dict] = []
+    # spec.geoms lists geoms in compiled geom-id order; checked against the model after compiling.
+    for gid, geom in enumerate(spec.geoms):
+        body = geom.parent.name
+        if body == "world" or geom.group != COLLISION_GROUP or geom.name in FOOT_GEOMS:
+            continue
+        entry = {"geom_id": gid, "body": body, "class": _class_name(geom)}
+        if entry["class"] in UNCHANGED_CLASSES:
+            unchanged.append(entry)
+        else:
+            geom.conaffinity = 1
+            fall_geoms.append(entry)
+    return fall_geoms, unchanged
+
+
+def _apply_friction(spec, mu: float) -> dict:
+    floor = spec.geom(FLOOR_GEOM)
+    before = [float(v) for v in floor.friction]
+    floor.friction = [float(mu), before[1], before[2]]
+    return {"geom": FLOOR_GEOM, "sliding_before": before[0], "sliding_after": float(mu),
+            "torsional": before[1], "rolling": before[2]}  # fmt: skip
+
+
+def _apply_payload(spec, payload: Payload) -> dict:
+    trunk = spec.body(TRUNK_BODY)
+    centre = np.asarray(trunk.ipos, dtype=float) + np.asarray(payload.offset_xyz_m, dtype=float)
+    body = trunk.add_body(name=PAYLOAD_BODY)
+    body.pos = centre.tolist()
+    body.quat = [1.0, 0.0, 0.0, 0.0]
+    # The inertial frame is set explicitly at the body origin (the box centre). Leaving it to the
+    # add_body keyword path put ipos = pos, i.e. the CoM at twice the requested offset.
+    body.ipos = [0.0, 0.0, 0.0]
+    body.iquat = [1.0, 0.0, 0.0, 0.0]
+    body.mass = float(payload.mass_kg)
+    body.inertia = list(payload.inertia_diag)
+    body.explicitinertial = True
+    geom = body.add_geom(name=PAYLOAD_GEOM, type=mujoco.mjtGeom.mjGEOM_BOX,
+                         size=list(payload.half_size))  # fmt: skip
+    geom.contype, geom.conaffinity, geom.group = 0, 0, PAYLOAD_GROUP
+    geom.mass = 0.0  # display only; the body's explicit inertial carries the mass
+    geom.rgba = [0.93, 0.55, 0.12, 1.0]
+    return {
+        "model": "uniform solid box welded to the trunk (child body, no joint), explicit inertial",
+        "model_version": PAYLOAD_MODEL_VERSION,
+        "mass_kg": float(payload.mass_kg),
+        "offset_xyz_m": [float(v) for v in payload.offset_xyz_m],
+        "box_size_m": list(PAYLOAD_BOX_SIZE_M),
+        "inertia_diag_kgm2": list(payload.inertia_diag),
+        "body_pos_in_trunk_m": centre.tolist(),
+        "geom": {"contype": 0, "conaffinity": 0, "group": PAYLOAD_GROUP, "mass": 0.0},
+    }
+
+
+def build_scene(
+    xml_path: Path,
+    scene: str,
+    *,
+    friction_mu: float | None = None,
+    payload: Payload | None = None,
+) -> SceneInfo:
+    """Compile `scene` from `xml_path`, optionally with a floor friction and a trunk payload.
+    Raises `SceneError` for an unknown scene name or an unsupported model."""
     if scene not in SCENES:
         raise SceneError(f"unknown scene {scene!r}; expected one of {SCENES}")
+    if payload is not None and payload.mass_kg <= 0:
+        payload = None
     xml_path = Path(xml_path)
     base_sha = hashlib.sha256(xml_path.read_bytes()).hexdigest()
 
     fall_geoms: list[dict] = []
     unchanged: list[dict] = []
-    if scene == SCENE_FEET_ONLY:
+    modifications: dict = {}
+    if scene == SCENE_FEET_ONLY and friction_mu is None and payload is None:
         model = load_model(xml_path)
     else:
         spec = mujoco.MjSpec.from_file(str(xml_path))
-        # spec.geoms lists geoms in compiled geom-id order; checked against the model below.
-        for gid, geom in enumerate(spec.geoms):
-            body = geom.parent.name
-            if body == "world" or geom.group != COLLISION_GROUP or geom.name in FOOT_GEOMS:
-                continue
-            entry = {"geom_id": gid, "body": body, "class": _class_name(geom)}
-            if entry["class"] in UNCHANGED_CLASSES:
-                unchanged.append(entry)
-            else:
-                geom.conaffinity = 1
-                fall_geoms.append(entry)
+        if scene == SCENE_FALL_CONTACT:
+            fall_geoms, unchanged = _apply_fall_contact(spec)
+        if friction_mu is not None:
+            modifications["friction"] = _apply_friction(spec, friction_mu)
+        if payload is not None:
+            modifications["payload"] = _apply_payload(spec, payload)
         model = spec.compile()
         for entry in fall_geoms + unchanged:
             gid = entry["geom_id"]
@@ -99,13 +195,15 @@ def build_scene(xml_path: Path, scene: str) -> SceneInfo:
         if floor < 0 or not model.geom_contype[floor] & 1:
             raise SceneError("floor geom missing or not collidable with conaffinity bit 1")
 
-    payload = {
+    record = {
         "name": scene,
         "transform_version": SCENE_TRANSFORM_VERSION,
         "base_xml_sha256": base_sha,
         "fall_geoms": fall_geoms,
         "unchanged_geoms": unchanged,
     }
+    if modifications:
+        record["modifications"] = modifications
     return SceneInfo(
         model=model,
         name=scene,
@@ -113,5 +211,6 @@ def build_scene(xml_path: Path, scene: str) -> SceneInfo:
         base_xml_sha256=base_sha,
         fall_geoms=tuple(fall_geoms),
         unchanged_geoms=tuple(unchanged),
-        transform_sha256=_transform_sha256(payload),
+        transform_sha256=_transform_sha256(record),
+        modifications=modifications,
     )
