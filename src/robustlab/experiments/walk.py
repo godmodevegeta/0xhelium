@@ -259,8 +259,66 @@ def upright_checks(
     }
 
 
+_TIME_EPS = 1e-9
+
+
+def window_mask(time_s: np.ndarray, start: float, end: float) -> np.ndarray:
+    """Ticks whose time lies in [start, end] (with a small float tolerance)."""
+    return (time_s >= start - _TIME_EPS) & (time_s <= end + _TIME_EPS)
+
+
+def mean_forward_speed(
+    time_s: np.ndarray, qpos: np.ndarray, start: float, end: float
+) -> float | None:
+    """Mean body-frame forward speed over [start, end].
+
+    Each Tick-to-Tick trunk displacement in the ground plane is projected onto the robot's heading
+    (yaw) at the middle of that interval; the sum is divided by the elapsed time. Interval k counts
+    if both of its end Ticks lie in the window. Returns None if the window holds < 2 Ticks."""
+    inside = np.flatnonzero(window_mask(time_s, start, end))
+    if inside.size < 2:
+        return None
+    first, last = inside[0], inside[-1]
+    xy = qpos[first : last + 1, 0:2]
+    yaw = yaw_from_quat(qpos[first : last + 1, 3:7])
+    heading = np.stack([np.cos(yaw), np.sin(yaw)], axis=1)
+    mid = heading[:-1] + heading[1:]
+    mid /= np.linalg.norm(mid, axis=1, keepdims=True)
+    forward = np.sum(np.diff(xy, axis=0) * mid, axis=1)
+    return float(forward.sum() / (time_s[last] - time_s[first]))
+
+
+def touchdowns(time_s: np.ndarray, contact: np.ndarray, start: float, end: float) -> list[int]:
+    """Per foot, false->true contact transitions whose later Tick time lies in [start, end]."""
+    rises = ~contact[:-1] & contact[1:]
+    later = window_mask(time_s[1:], start, end)
+    return [int(n) for n in (rises & later[:, None]).sum(axis=0)]
+
+
+def duty_factor(time_s: np.ndarray, contact: np.ndarray, start: float, end: float) -> list[float]:
+    mask = window_mask(time_s, start, end)
+    if not mask.any():
+        return [0.0] * contact.shape[1]
+    return [float(x) for x in contact[mask].mean(axis=0)]
+
+
+def _wrap_angle(angle: float) -> float:
+    return (angle + math.pi) % (2 * math.pi) - math.pi
+
+
+def criteria_set_for(command, horizon_s: float, criteria: WalkCriteria) -> str:
+    """Which fixed criteria apply: 'forward' for the Forward_Episode command with a horizon that
+    covers the measurement window, 'zero' for the zero command, else 'upright' only."""
+    cmd = tuple(float(c) for c in command)
+    if cmd == criteria.forward_command and horizon_s >= criteria.window_end_s - _TIME_EPS:
+        return "forward"
+    if cmd == criteria.zero_command:
+        return "zero"
+    return "upright"
+
+
 def evaluate(record: EpisodeRecord, criteria: WalkCriteria = WalkCriteria()) -> dict:
-    """Outcome of one episode against the fixed criteria."""
+    """Outcome of one episode against the fixed criteria (Requirement 10)."""
     outcome = upright_checks(
         record.up_z,
         record.trunk_z,
@@ -269,8 +327,59 @@ def evaluate(record: EpisodeRecord, criteria: WalkCriteria = WalkCriteria()) -> 
         record.time,
         criteria,
     )
-    failed = [] if outcome["upright_45"] else ["upright_45"]
     outcome["warnings"] = dict(record.warnings)
+
+    # Progress metrics use the trajectory up to the last Tick before the first violation, so
+    # motion after a fall or a non-finite state is never credited.
+    last = record.n_ticks - 1
+    if outcome["first_violation_time"] is not None:
+        last = int(np.flatnonzero(record.time >= outcome["first_violation_time"] - _TIME_EPS)[0])
+        last -= 1
+    start_xy = record.initial_qpos[0:2]
+    yaw0 = float(yaw_from_quat(record.initial_qpos[3:7]))
+    heading0 = np.array([math.cos(yaw0), math.sin(yaw0)])
+    if last >= 0:
+        valid = slice(0, last + 1)
+        rel = record.qpos[valid, 0:2] - start_xy
+        dist = np.linalg.norm(rel, axis=1)
+        outcome["forward_distance_m"] = float(rel[-1] @ heading0)
+        outcome["final_horizontal_disp_m"] = float(dist[-1])
+        outcome["horizontal_disp_m"] = float(dist.max())  # max over the valid episode
+        yaw_end = float(yaw_from_quat(record.qpos[last, 3:7]))
+        outcome["yaw_drift_deg"] = math.degrees(_wrap_angle(yaw_end - yaw0))
+        outcome["progress_until_s"] = float(record.time[last])
+    else:
+        outcome.update(
+            forward_distance_m=0.0,
+            final_horizontal_disp_m=0.0,
+            horizontal_disp_m=0.0,
+            yaw_drift_deg=0.0,
+            progress_until_s=0.0,
+        )
+
+    w0, w1 = criteria.window_start_s, criteria.window_end_s
+    outcome["window_s"] = [w0, w1]
+    outcome["mean_forward_speed"] = mean_forward_speed(record.time, record.qpos, w0, w1)
+    outcome["mean_speed"] = (
+        outcome["forward_distance_m"] / outcome["progress_until_s"]
+        if outcome["progress_until_s"] > 0
+        else 0.0
+    )
+    outcome["touchdowns"] = touchdowns(record.time, record.contact, w0, w1)
+    outcome["duty_factor"] = duty_factor(record.time, record.contact, w0, w1)
+
+    horizon_s = float(record.n_ticks * record.ctrl_dt)
+    criteria_set = criteria_set_for(record.command[0], horizon_s, criteria)
+    outcome["criteria_set"] = criteria_set
+    failed = [] if outcome["upright_45"] else ["upright_45"]
+    if criteria_set == "forward":
+        speed = outcome["mean_forward_speed"]
+        if speed is None or speed < criteria.min_forward_speed:
+            failed.append("mean_forward_speed")
+        if min(outcome["touchdowns"]) < criteria.min_touchdowns:
+            failed.append("touchdowns")
+    elif criteria_set == "zero" and not (outcome["horizontal_disp_m"] < criteria.zero_cmd_max_disp):
+        failed.append("horizontal_disp")
     outcome["passed"] = not failed
     outcome["failed_checks"] = failed
     return outcome
