@@ -182,12 +182,12 @@ M1+ (no UI, schema, LLM, optimizer, adapter, push, or module stubs).
     0,0,0 --seconds 10 --out runs/m0/zero` and `... --command 1,0,0 --seconds 51 --out
     runs/m0/latency`, each printing the summary table
 
-- [ ] 7. M0 evidence and stop
-  - [ ] 7.1 Run the full validation suite
+- [x] 7. M0 evidence and stop
+  - [x] 7.1 Run the full validation suite
     - `uv run ruff check . && uv run ruff format --check . && uv run pytest -q && uv run pytest -q -m
       integration`; capture output
     - _Requirements: 13.1_
-  - [ ] 7.2 Write `docs/milestones/M0.md`
+  - [x] 7.2 Write `docs/milestones/M0.md`
     - Exact commands, go/no-go result, all hashes, versions, criteria with measured values, oracle
       parity max errors, latency stats, `uv run pytest -q` output, trace paths, render skip if any
     - Limitations: `walk.xml` collides feet only so non-foot contacts are not modelled (M1 needs a
@@ -195,11 +195,11 @@ M1+ (no UI, schema, LLM, optimizer, adapter, push, or module stubs).
       C MuJoCo; identical results claimed only within one build and machine; policy JSON license
       inherited from repo MIT. If any criterion failed, do not call the policy walking
     - _Requirements: 13.1, 13.2, 10.7_
-  - [ ] 7.3 Update `docs/kiro_build_log.md` and `README.md`
+  - [x] 7.3 Update `docs/kiro_build_log.md` and `README.md`
     - Map Kiro spec outputs to observed tests; final setup/test/run commands; confirm no M1+ code or
       stubs exist; commit
     - _Requirements: 12.1, 12.3, 13.3_
-  - [ ] 7.4 Report and stop
+  - [x] 7.4 Report and stop
     - Report what works, what failed and what was learned; stop for review before M1
     - _Requirements: 13.1_
   - **Exit:** `docs/milestones/M0.md` committed with measured evidence; stop for review before M1.
