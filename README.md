@@ -3,8 +3,9 @@
 A CPU-first simulation robustness prototype for legged robots. Milestone M0 runs an existing
 pretrained Go1 walking policy in native MuJoCo and records a trajectory with a run manifest.
 
-Status: M0 and M1 approved; M2 (reproducible experiment runner) implemented, awaiting review. Every
-command below was run, and its observed output is in `docs/milestones/M0.md`, `M1.md` and `M2.md`.
+Status: M0–M2 approved; M3 (web app with 3D replays) implemented locally, awaiting review, not
+deployed. Every command below was run, and its observed output is in `docs/milestones/M0.md` to
+`M3.md`.
 The pretrained policy (`go1-walk-s0` from [weeble](https://github.com/mottopanikeiku/weeble)) passed
 the fixed walking criteria: a 10 s forward run at 0.944 m/s mean over 2–10 s, and a zero-command run
 that stayed within 0.016 m. A 100 N shove toward its right for 0.1 s, started at each of the 256
@@ -81,6 +82,19 @@ difference, aggregates with denominators, provenance, and what the numbers do an
 for up to 32 trials, each trial's nominal and shoved trajectories in the `walk` format. Options:
 `--trials`, `--seed`, `--no-save-trajectories`, `--overwrite`, `--dry-run`.
 
+M3 web app (needs Node 20+ for the build):
+
+```bash
+uv sync --extra server
+(cd web && npm ci && npm run build)
+uv run robustlab serve                           # http://127.0.0.1:8000
+```
+
+Two presets: **Hidden Phase Vulnerability** shows the precomputed M2 sweep (11/256 falls at
+100 N) and re-simulates any timing for a 3D replay. **Live Stress Test** runs real 16-trial
+experiments at 150 N on request and replays each trial. The browser only plays back poses computed
+by MuJoCo on the server.
+
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and
 `manifest.json` into the `--out` directory. It refuses to replace an existing run unless
 `--overwrite` is given. Commands are body-frame `vx,vy,yaw` (m/s, m/s, rad/s) within the policy's
@@ -100,6 +114,8 @@ committed; `scripts/fetch_assets.py` re-downloads them from the pinned weeble co
 - `docs/milestones/M1.md` — M1 evidence: shove and fall results, scene comparison with M0, tests
 - `.kiro/specs/experiment-runner/` — M2 requirements, design and tasks
 - `docs/milestones/M2.md` — M2 evidence: paired suites, fall frequencies, what they establish
+- `.kiro/specs/web-replay/` — M3 requirements, design and tasks
+- `docs/milestones/M3.md` — M3 evidence: force sweep, presets, live runs, replay, endpoint timings
 - `docs/decision-log/` — architecture decision records
 
 ## License

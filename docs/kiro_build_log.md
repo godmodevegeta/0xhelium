@@ -152,3 +152,15 @@ local). Branch `m2-experiment-runner`. Measured results are in `docs/milestones/
 | 2–5 | `experiments/stack.py`, `experiments/suite.py`, `experiment` CLI, `examples/m2/`, tests | `0b57e70` | `pytest -q` 123 passed; `-m integration` 14 passed; Properties 17–19 (Hypothesis) pass |
 | 6 | 16-trial stratified suite twice, 256-start exhaustive grid | runs at `0b57e70` | 0/16 falls (Wilson [0, 0.194]), identical `results_sha256` on rerun; grid 11/256 falls |
 | 7 | `M2.md`, README, this section | final M2 commit | suites as above |
+
+## M3 — Web application with 3D replays
+
+Spec: `.kiro/specs/web-replay/`. M2 merged into `main` with `--no-ff` (`451fef8`; tag
+`m2-baseline` = `64165ea`). Branch `m3-web-replay`. Measured results are in `docs/milestones/M3.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| 1 | Force sweep script; 110–150 N exhaustive + 16-trial runs; spec | `c682baa`, `ec381cd` | 32, 45, 53, 56, 65 of 256 falls; 150 N chosen (25.4%) |
+| 2–4 | `run_trial` refactor, `replay.py`, presets, `robustlab.api`, `serve`, API tests | `3723669` | M2 digest unchanged; 132 fast + 16 integration tests pass |
+| 5 | `web/` React + TS + Three.js viewer | `57b25a9` | `tsc --noEmit` clean; `vite build` ok; headless screenshots |
+| 6 | Live runs, endpoint timings, fresh-clone smoke, docs | final M3 commit | 4/16, 5/16, 4/16 live; reproduce command matches digest; clone serves and replays |
