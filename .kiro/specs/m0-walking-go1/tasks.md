@@ -57,68 +57,68 @@ M1+ (no UI, schema, LLM, optimizer, adapter, push, or module stubs).
     - _Requirements: 2.1, 2.2, 2.3, 2.5, 12.2_
   - **Exit/demo:** `uv sync && uv run pytest -q && uv run robustlab doctor`
 
-- [ ] 3. Pinned assets and model loader
+- [x] 3. Pinned assets and model loader
   - [x] 3.1 Implement `scripts/fetch_assets.py`
     - Download from the pinned commit: `assets/go1/walk.xml`, the 5 STLs under `assets/go1/assets/`,
       `LICENSE-Menagerie`, `LICENSE-Playground`, `walk.provenance.json`, `policies/go1-walk-s0.json`;
       write `assets/assets.lock.json` (commit, URL, SHA-256 per file) atomically; abort without
       touching committed files on network error
     - _Requirements: 3.1, 3.2_
-  - [ ] 3.2 Fetch, commit pinned files and write `THIRD_PARTY_NOTICES.md`
+  - [x] 3.2 Fetch, commit pinned files and write `THIRD_PARTY_NOTICES.md`
     - Notices: weeble MIT, Playground-derived XML Apache-2.0, Menagerie meshes BSD-3-Clause, and the
       assumption that the policy JSON is covered by the weeble repo MIT license
     - _Requirements: 3.1, 12.1, 12.4_
-  - [ ] 3.3 Implement asset verification and `robustlab verify-assets`
+  - [x] 3.3 Implement asset verification and `robustlab verify-assets`
     - `src/robustlab/assets.py`: `sha256_file`, `verify_assets(root)` against the lock and
       `walk.provenance.json`; CLI prints per-file result, exits non-zero on any issue
     - _Requirements: 3.3, 3.4_
-  - [ ] 3.4 Implement `src/robustlab/physics/model.py`
+  - [x] 3.4 Implement `src/robustlab/physics/model.py`
     - `load_model`, `apply_model_parameters` (arrays + `opt`), `resolve_ids` (trunk, imu site, four
       feet, floor), `check_model` (nq 19, nv 18, nu 12, timestep 0.004, n_substeps 5, actuator order ==
       policy joint order, read from the raw policy JSON until Task 4)
     - _Requirements: 4.1, 4.2, 3.3, 4.4_
-  - [ ] 3.5 Write model and asset tests
+  - [x] 3.5 Write model and asset tests
     - Example tests for model facts and ID resolution (missing name raises)
     - Property 1: Tampered or missing assets are detected — **Validates: Requirements 3.3, 3.4**
     - Property 2: Applying model parameters is idempotent — **Validates: Requirements 4.4, 4.5**
     - _Requirements: 3.4, 4.1, 4.2, 4.3, 4.5_
   - **Exit/demo:** `uv run pytest -q && uv run robustlab verify-assets`
 
-- [ ] 4. Policy loader and NumPy actor
-  - [ ] 4.1 Add the test oracle
+- [x] 4. Policy loader and NumPy actor
+  - [x] 4.1 Add the test oracle
     - Copy weeble `eval/sim.py` to `tests/reference/weeble_sim.py` with its MIT copyright and
       permission notice and the source commit in a header; tests only
     - Test that no module under `src/` imports `tests`
     - _Requirements: 8.1, 8.2_
-  - [ ] 4.2 Implement `load_policy` in `src/robustlab/policy/actor.py`
+  - [x] 4.2 Implement `load_policy` in `src/robustlab/policy/actor.py`
     - Accept only schema_version 1, activation `swish|silu`, encoding `base64-f32-le`; chained layer
       shapes; obs_dim 48, act_dim 12; finite weights and normalizer; file SHA-256 equals lock;
       normalizer selected by `obs_key`; raise `PolicyError(field, reason)`
     - Switch `check_model` to the validated `Policy`
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 2.4_
-  - [ ] 4.3 Implement `Actor` with stable swish
+  - [x] 4.3 Implement `Actor` with stable swish
     - `(x-mean)/std` float32, no epsilon or clip; hidden `swish(xW+b)` via stable sigmoid; linear last
       layer; `tanh(logits[:12])`; preallocated float32 buffers
     - _Requirements: 6.1, 6.2, 6.3, 6.4_
-  - [ ] 4.4 Write policy and actor unit/property tests
+  - [x] 4.4 Write policy and actor unit/property tests
     - Normalizer selection and buffer reuse examples
     - Property 3: Malformed policies are rejected — **Validates: Requirements 5.1, 5.2, 5.3, 5.4**
     - Property 4: Swish is finite and accurate — **Validates: Requirements 6.3**
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 6.3, 6.4_
-  - [ ] 4.5 Write actor oracle-parity test
+  - [x] 4.5 Write actor oracle-parity test
     - Property 5: Actor matches the Oracle (1,000 seeded observations, atol 1e-7, record max error) —
       **Validates: Requirements 6.1, 6.2, 6.5**
     - Reset-observation demo test printing our action, the Oracle action and max abs error
     - _Requirements: 6.5_
   - **Exit/demo:** `uv run pytest -q && uv run pytest -q -s -k reset_parity`
 
-- [ ] 5. Observation, control loop, trace and manifest
-  - [ ] 5.1 Implement `src/robustlab/policy/observation.py`
+- [x] 5. Observation, control loop, trace and manifest
+  - [x] 5.1 Implement `src/robustlab/policy/observation.py`
     - 48 fields in `observation.fields` order: velocimeter local_linvel, gyro, gravity
       `R_imu.T @ [0,0,-1]`, `qpos[7:]-default_pose`, `qvel[6:]`, delayed action, command; read after
       `mj_step(..., nstep=5)` with no `mj_forward`
     - _Requirements: 7.1, 7.2_
-  - [ ] 5.2 Implement the episode runner in `src/robustlab/experiments/walk.py`
+  - [x] 5.2 Implement the episode runner in `src/robustlab/experiments/walk.py`
     - Reset (`mj_resetData`, default qpos/qvel, `ctrl=qpos[7:]`, command, zero `last_action`,
       `mj_forward`); Tick: clear `xfrc_applied`, `ctrl = default_pose + 0.5*action` held for 5
       substeps, then `obs_last_action ← last_action`, `last_action ← a`; preallocated per-Tick
@@ -126,15 +126,15 @@ M1+ (no UI, schema, LLM, optimizer, adapter, push, or module stubs).
       warning counts; per-Tick `perf_counter_ns`; provisional upright outcome (45° gate, 60°
       recorded, trunk z ≥ 0.18 m, finite, no warnings); `latency_summary`
     - _Requirements: 7.3, 7.4, 7.5, 7.6, 9.1, 10.1, 10.2, 11.2_
-  - [ ] 5.3 Implement `src/robustlab/experiments/trace.py`
+  - [x] 5.3 Implement `src/robustlab/experiments/trace.py`
     - `write_run` → `runs/m0/<run_id>/trajectory.json` (50 Hz) and `manifest.json` (all fields in
       Requirement 9.3) via temp file + `os.replace`; JSON-write timing; `read_run`
     - _Requirements: 9.2, 9.3, 9.4, 11.3_
-  - [ ] 5.4 Add the `robustlab walk` subcommand
+  - [x] 5.4 Add the `robustlab walk` subcommand
     - `--policy --command vx,vy,yaw --seconds --out [--seed]`; verify assets first; run, evaluate,
       write run, print summary table
     - _Requirements: 9.2, 3.4_
-  - [ ] 5.5 Write loop and trace unit/property tests
+  - [x] 5.5 Write loop and trace unit/property tests
     - Reset observation example (gravity ≈ [0,0,-1], zero joint offsets, zero action field);
       manifest required-keys check; subprocess short walk leaves `jax`/`torch` out of `sys.modules`
     - Property 6: Observation carries the delayed action — **Validates: Requirements 7.3**
@@ -142,7 +142,7 @@ M1+ (no UI, schema, LLM, optimizer, adapter, push, or module stubs).
     - Property 8: Trace serialization round trip — **Validates: Requirements 9.4, 9.6**
     - Property 9: Upright predicate — **Validates: Requirements 10.1, 10.2**
     - _Requirements: 2.3, 7.1, 7.3, 7.4, 7.5, 7.6, 9.3, 9.4, 9.6, 10.1, 10.2_
-  - [ ] 5.6 Write closed-loop integration tests (`-m integration`)
+  - [x] 5.6 Write closed-loop integration tests (`-m integration`)
     - 500-Tick parity with the Oracle: actions and qpos atol 1e-6
     - Two runs of the same configuration give identical trajectories
     - _Requirements: 7.7, 9.5_
