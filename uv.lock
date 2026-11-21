@@ -61,6 +61,18 @@ wheels = [
 ]
 
 [[package]]
+name = "cma"
+version = "4.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/21/37ceb4618fb381b38e584ec91ee14a62cf544f917e59e771e44684b19cb3/cma-4.6.0.tar.gz", hash = "sha256:0445d917d17d0a67f32564ac3f5abfe31bf52bd94cda5a54826a6f13efa83a18", size = 345459, upload-time = "2026-11-15T20:22:31.233Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/68/d4/a591dd5ab88bd701cc6eb99cff506a9bf4a59844aec2a715dfc41b320e47/cma-4.6.0-py3-none-any.whl", hash = "sha256:96c76678756d36b600ce6150caa30a62933fc652b4e22cc987746a2b1561db6a", size = 357022, upload-time = "2026-11-15T20:22:29.669Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -401,13 +413,18 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+search = [
+    { name = "cma" },
+]
 server = [
+    { name = "cma" },
     { name = "fastapi" },
     { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "cma" },
     { name = "httpx" },
     { name = "hypothesis" },
     { name = "pytest" },
@@ -416,15 +433,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cma", marker = "extra == 'search'", specifier = ">=4.0" },
+    { name = "cma", marker = "extra == 'server'", specifier = ">=4.0" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115" },
     { name = "mujoco", specifier = "==3.15.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.30" },
 ]
-provides-extras = ["server"]
+provides-extras = ["server", "search"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cma", specifier = ">=4.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "pytest", specifier = ">=8.0" },
