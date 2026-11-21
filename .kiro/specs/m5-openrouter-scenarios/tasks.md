@@ -6,13 +6,13 @@
   - [x] 1.1 Tag `m4-baseline` = `7127526`; merge into `main` (`26ef65a`); branch `m5-openrouter-scenarios`
   - [x] 1.2 Inspect contact friction resolution (priority, condim, pairs, override) and runtime contacts
   - [x] 1.3 Probe MjSpec payload body (ids unchanged, mass +m)
-- [ ] 2. M5a physics and schema
-  - [ ] 2.1 `scenarios/schema.py` (Param, validation, adjustments)
-  - [ ] 2.2 `build_scene` friction/payload modifications; `physics/scenario_model.py` (reports, LRU cache)
-  - [ ] 2.3 `experiments/scenario_run.py` (single, suite, foot slip, records); `robustlab scenario`
-  - [ ] 2.4 Hypothesis + integration tests (golden parity, friction contacts, slip, mass, inertia)
-  - [ ] 2.5 Measurements: nominal, friction sweep, payload sweep, combined; 256-start grids
-  - [ ] 2.6 M5a checkpoint: full suites pass before M5b
+- [x] 2. M5a physics and schema
+  - [x] 2.1 `scenarios/schema.py` (Param, validation, adjustments)
+  - [x] 2.2 `build_scene` friction/payload modifications; `physics/scenario_model.py` (reports, LRU cache)
+  - [x] 2.3 `experiments/scenario_run.py` (single, suite, foot slip, records); `robustlab scenario`
+  - [x] 2.4 Hypothesis + integration tests (golden parity, friction contacts, slip, mass, inertia)
+  - [x] 2.5 Measurements: nominal, friction sweep, payload sweep, combined; 256-start grids
+  - [x] 2.6 M5a checkpoint: full suites pass before M5b
   - _Requirements: 1–5, 8.1, 8.3_
 - [ ] 3. M5b OpenRouter and web
   - [ ] 3.1 `llm/openrouter.py`, `llm/prompt.py`; mocked tests; real smoke test if a key exists
