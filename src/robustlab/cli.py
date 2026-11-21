@@ -145,16 +145,20 @@ def _print_summary(manifest: dict, paths) -> None:
         ("min trunk z", f"{fmt(out['min_trunk_z'])} m"),
         ("finite / no warnings", f"{out['finite']} / {out['warnings_ok']}"),
     ]
+    # Window metrics stop at the horizon and at the last Tick before a fall; label what was used.
+    w0, w1 = out.get("window_s", (2.0, 10.0))
+    used = f"{w0:g}-{min(w1, out.get('progress_until_s', w1)):.2f} s"
+    progress = "until fall" if out.get("fall", {}).get("kind", "none") != "none" else ""
     for key, label, unit in (
-        ("forward_distance_m", "forward distance", "m"),
-        ("mean_forward_speed", "mean fwd speed 2-10 s", "m/s"),
+        ("forward_distance_m", f"forward distance {progress}".strip(), "m"),
+        ("mean_forward_speed", f"mean fwd speed {used}", "m/s"),
         ("horizontal_disp_m", "horizontal displacement", "m"),
         ("yaw_drift_deg", "yaw drift", "deg"),
     ):
         if key in out:
             rows.append((label, f"{fmt(out[key])} {unit}"))
     if "touchdowns" in out:
-        rows.append(("touchdowns 2-10 s FR,FL,RR,RL", ", ".join(map(str, out["touchdowns"]))))
+        rows.append((f"touchdowns {used} FR,FL,RR,RL", ", ".join(map(str, out["touchdowns"]))))
         rows.append(("duty factor FR,FL,RR,RL", ", ".join(f"{d:.2f}" for d in out["duty_factor"])))
     push = manifest["push"]
     if push is None:
