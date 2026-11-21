@@ -157,3 +157,15 @@ def test_busy_guard_rejects_second_run(client) -> None:
         assert client.post("/api/presets/live-stress/runs", json={}).status_code == 409
     finally:
         del jobs.jobs["ls-29990101T000000Z-1"]
+
+
+def test_core_modules_do_not_import_the_web_stack() -> None:
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys, robustlab.cli, robustlab.experiments.suite, robustlab.replay; "
+        "print(sorted(m for m in sys.modules if m.split('.')[0] in ('fastapi', 'uvicorn', 'starlette')))"
+    )
+    out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "[]"
