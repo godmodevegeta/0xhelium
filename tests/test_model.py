@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import copy
+import dataclasses
 
 import mujoco
 import numpy as np
@@ -29,31 +29,29 @@ def model(policy_spec) -> mujoco.MjModel:
     return loaded
 
 
-def test_model_facts(model, policy_spec) -> None:
+def test_model_facts(model, policy) -> None:
     assert (model.nq, model.nv, model.nu) == (19, 18, 12)
     assert model.opt.timestep == 0.004
-    assert policy_spec["n_substeps"] == 5
-    check_model(model, policy_spec)
+    assert policy.n_substeps == 5
+    check_model(model, policy)
 
 
-def test_actuator_order_matches_policy_order(model, policy_spec) -> None:
-    expected = policy_joint_order(policy_spec["feet_geoms"])
+def test_actuator_order_matches_policy_order(model, policy) -> None:
+    expected = policy_joint_order(policy.feet_geoms)
+    assert policy.joint_names == expected
     assert expected[:3] == ("FR_hip_joint", "FR_thigh_joint", "FR_calf_joint")
     assert actuated_joint_order(model) == expected
 
 
-def test_check_model_rejects_reordered_feet(model, policy_spec) -> None:
-    spec = copy.deepcopy(policy_spec)
-    spec["feet_geoms"] = ["FL", "FR", "RR", "RL"]
+def test_check_model_rejects_reordered_feet(model, policy) -> None:
+    bad = dataclasses.replace(policy, feet_geoms=("FL", "FR", "RR", "RL"))
     with pytest.raises(ModelError, match="feet_geoms"):
-        check_model(model, spec)
+        check_model(model, bad)
 
 
-def test_check_model_rejects_wrong_substeps(model, policy_spec) -> None:
-    spec = copy.deepcopy(policy_spec)
-    spec["n_substeps"] = 4
+def test_check_model_rejects_wrong_substeps(model, policy) -> None:
     with pytest.raises(ModelError, match="n_substeps"):
-        check_model(model, spec)
+        check_model(model, dataclasses.replace(policy, n_substeps=4))
 
 
 def test_resolve_ids(model) -> None:

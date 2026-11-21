@@ -22,6 +22,15 @@ def policy_spec() -> dict:
 
 
 @pytest.fixture(scope="session")
+def policy():
+    """The validated policy, hash-checked against the asset lock."""
+    from robustlab.assets import locked_sha256
+    from robustlab.policy.actor import load_policy
+
+    return load_policy(POLICY_PATH, locked_sha256(REPO_ROOT, "policies/go1-walk-s0.json"))
+
+
+@pytest.fixture(scope="session")
 def oracle():
     """weeble eval/sim.py loaded by file path, so it is never importable as a package module."""
     name = "weeble_sim_oracle"

@@ -13,10 +13,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import mujoco
 import numpy as np
+
+if TYPE_CHECKING:  # avoid a runtime import cycle: policy.actor imports policy_joint_order
+    from robustlab.policy.actor import Policy
 
 NQ, NV, NU = 19, 18, 12
 SIM_DT = 0.004
@@ -115,11 +118,8 @@ def actuated_joint_order(model: mujoco.MjModel) -> tuple[str, ...]:
     return tuple(names)
 
 
-def check_model(model: mujoco.MjModel, policy: Mapping[str, Any]) -> None:
-    """Assert the model matches the policy's model contract; raises `ModelError`.
-
-    `policy` is the raw policy JSON mapping (switched to the validated `Policy` in Task 4.2).
-    """
+def check_model(model: mujoco.MjModel, policy: Policy) -> None:
+    """Assert the model matches the validated policy's model contract; raises `ModelError`."""
     facts = {"nq": (model.nq, NQ), "nv": (model.nv, NV), "nu": (model.nu, NU)}
     for field, (actual, expected) in facts.items():
         if actual != expected:
@@ -128,23 +128,25 @@ def check_model(model: mujoco.MjModel, policy: Mapping[str, Any]) -> None:
         raise ModelError(f"timestep is {model.opt.timestep}, expected {SIM_DT}")
 
     declared = {
-        "n_substeps": (policy["n_substeps"], N_SUBSTEPS),
-        "simulation_dt": (policy["simulation_dt"], SIM_DT),
-        "control_dt": (policy["control_dt"], CTRL_DT),
-        "force_body": (policy["force_body"], TRUNK_BODY),
-        "floor_geom": (policy["floor_geom"], FLOOR_GEOM),
-        "feet_geoms": (tuple(policy["feet_geoms"]), FOOT_GEOMS),
-        "sensors.gravity_site": (policy["sensors"]["gravity_site"], IMU_SITE),
-        "sensors.gyro": (policy["sensors"]["gyro"], GYRO_SENSOR),
-        "sensors.local_linvel": (policy["sensors"]["local_linvel"], VELOCIMETER_SENSOR),
+        "n_substeps": (policy.n_substeps, N_SUBSTEPS),
+        "simulation_dt": (policy.simulation_dt, SIM_DT),
+        "control_dt": (policy.control_dt, CTRL_DT),
+        "force_body": (policy.force_body, TRUNK_BODY),
+        "floor_geom": (policy.floor_geom, FLOOR_GEOM),
+        "feet_geoms": (tuple(policy.feet_geoms), FOOT_GEOMS),
+        "sensors.gravity_site": (policy.sensors.get("gravity_site"), IMU_SITE),
+        "sensors.gyro": (policy.sensors.get("gyro"), GYRO_SENSOR),
+        "sensors.local_linvel": (policy.sensors.get("local_linvel"), VELOCIMETER_SENSOR),
     }
     for field, (actual, expected) in declared.items():
         if actual != expected:
             raise ModelError(f"policy {field} is {actual!r}, expected {expected!r}")
-    if not np.isclose(policy["simulation_dt"] * policy["n_substeps"], policy["control_dt"]):
+    if not np.isclose(policy.simulation_dt * policy.n_substeps, policy.control_dt):
         raise ModelError("policy simulation_dt * n_substeps != control_dt")
 
-    expected_order = policy_joint_order(policy["feet_geoms"])
+    expected_order = policy_joint_order(policy.feet_geoms)
+    if tuple(policy.joint_names) != expected_order:
+        raise ModelError(f"policy joint order {policy.joint_names} != {expected_order}")
     actual_order = actuated_joint_order(model)
     if actual_order != expected_order:
         raise ModelError(f"actuator joint order {actual_order} != policy order {expected_order}")
