@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "sideways-shove-grid-all-256",
+  "description": "Same shove as sideways-shove-stratified-16, simulated at every one of the 256 start substeps in [2.000, 3.024) s: the exact failure frequency over that test distribution.",
+  "policy": "policies/go1-walk-s0.json",
+  "scene": "fall-contact",
+  "command": [1.0, 0.0, 0.0],
+  "horizon_s": 5.0,
+  "trials": 256,
+  "seed": 20261121,
+  "attack": {
+    "kind": "push",
+    "force_n": 100.0,
+    "direction": "right",
+    "duration_s": 0.1,
+    "start": {"method": "grid", "low_s": 2.0, "high_s": 3.024}
+  }
+}

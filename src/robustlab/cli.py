@@ -89,7 +89,6 @@ def _cmd_verify_assets(args: argparse.Namespace) -> int:
 
 EXIT_ASSETS, EXIT_INVALID, EXIT_WRITE = 1, 2, 3
 MAX_SECONDS = 600.0
-MODEL_XML_RELPATH = "assets/go1/walk.xml"
 
 
 def _parse_command(text: str) -> tuple[float, float, float]:
@@ -103,27 +102,6 @@ def _parse_command(text: str) -> tuple[float, float, float]:
     if not all(math.isfinite(v) for v in values):
         raise argparse.ArgumentTypeError("command values must be finite")
     return values  # type: ignore[return-value]
-
-
-def _load_stack(root: Path, policy_path: Path, scene: str = "fall-contact"):
-    """Load and cross-check scene + policy. Returns (scene_info, ids, policy, actor, load_s)."""
-    import time
-
-    from robustlab.assets import locked_sha256
-    from robustlab.physics.model import apply_model_parameters, check_model, resolve_ids
-    from robustlab.physics.scene import build_scene
-    from robustlab.policy.actor import Actor, load_policy
-
-    start = time.perf_counter()
-    policy_rel = Path(policy_path).resolve().relative_to(root.resolve()).as_posix()
-    policy = load_policy(policy_path, locked_sha256(root, policy_rel))
-    scene_info = build_scene(root / MODEL_XML_RELPATH, scene)
-    model = scene_info.model
-    apply_model_parameters(model, policy.model_parameters)
-    check_model(model, policy)
-    ids = resolve_ids(model)
-    actor = Actor(policy)
-    return scene_info, ids, policy, actor, time.perf_counter() - start
 
 
 def _print_summary(manifest: dict, paths) -> None:
@@ -215,7 +193,7 @@ def _print_summary(manifest: dict, paths) -> None:
 
 def _cmd_walk(args: argparse.Namespace) -> int:
     root = Path(args.root)
-    from robustlab.assets import AssetError, load_lock, verify_assets
+    from robustlab.assets import AssetError, verify_assets
 
     issues = verify_assets(root)
     if issues:
@@ -224,15 +202,12 @@ def _cmd_walk(args: argparse.Namespace) -> int:
         print("walk: asset verification failed; refusing to run", file=sys.stderr)
         return EXIT_ASSETS
 
-    import json
-
-    import mujoco
-    import numpy as np
-
     from robustlab.experiments.push import PushError, PushScenario, parse_direction
-    from robustlab.experiments.trace import build_manifest, write_run
-    from robustlab.experiments.walk import EpisodeConfig, EpisodeRunner, latency_summary
+    from robustlab.experiments.stack import load_stack
+    from robustlab.experiments.trace import write_run
+    from robustlab.experiments.walk import EpisodeConfig, EpisodeRunner
     from robustlab.physics.model import ModelError
+    from robustlab.physics.scene import SceneError
     from robustlab.policy.actor import PolicyError
 
     if not (0 < args.seconds <= MAX_SECONDS):
@@ -259,56 +234,36 @@ def _cmd_walk(args: argparse.Namespace) -> int:
             print(f"walk: {exc}", file=sys.stderr)
             return EXIT_INVALID
     try:
-        scene_info, ids, policy, actor, load_s = _load_stack(root, Path(args.policy), args.scene)
-        model = scene_info.model
-    except (PolicyError, ModelError, AssetError, ValueError) as exc:
+        stack = load_stack(root, Path(args.policy), args.scene)
+    except (PolicyError, ModelError, AssetError, SceneError, ValueError) as exc:
         print(f"walk: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_INVALID
-    for value, (lo, hi), name in zip(args.command, policy.command_ranges, ("vx", "vy", "yaw")):
-        if not lo <= value <= hi:
-            print(
-                f"walk: command {name}={value} outside trained range [{lo}, {hi}]", file=sys.stderr
-            )
-            return EXIT_INVALID
+    error = stack.command_error(args.command)
+    if error:
+        print(f"walk: {error}", file=sys.stderr)
+        return EXIT_INVALID
 
     config = EpisodeConfig(command=args.command, seconds=args.seconds, seed=args.seed, push=push)
-    runner = EpisodeRunner(model, ids, policy, actor)
+    runner = EpisodeRunner(stack.model, stack.ids, stack.policy, stack.actor)
     try:
         record = runner.run(config)
     except ValueError as exc:
         print(f"walk: {exc}", file=sys.stderr)
         return EXIT_INVALID
 
-    from robustlab.experiments.walk import WalkCriteria, criteria_dict, evaluate
+    from robustlab.experiments.walk import WalkCriteria, evaluate
 
     criteria = WalkCriteria()
     outcome = evaluate(record, criteria)
     run_dir = Path(args.out)
-    lock = load_lock(root)
-    provenance = json.loads((root / "assets/go1/walk.provenance.json").read_text())
-    manifest = build_manifest(
+    manifest = stack.manifest_for(
+        record,
         run_id=run_dir.name,
-        record=record,
         command=args.command,
         seconds=args.seconds,
         seed=args.seed,
-        criteria=criteria_dict(criteria),
         outcome=outcome,
-        latency=latency_summary(record.tick_ns, record.ctrl_dt),
-        load_s=load_s,
-        policy_info={
-            "path": Path(args.policy).as_posix(),
-            "sha256": policy.sha256,
-            "run_id": policy.run_id,
-            "env_name": policy.env_name,
-            "trained_with": policy.versions,
-        },
-        lock=lock,
-        provenance=provenance,
-        library_versions={"numpy": np.__version__, "mujoco": mujoco.__version__},
-        repo_root=root,
-        scene=scene_info.describe(),
-        push=record.push,
+        criteria=criteria,
     )
     try:
         paths = write_run(run_dir, record, manifest, overwrite=args.overwrite)
@@ -319,6 +274,82 @@ def _cmd_walk(args: argparse.Namespace) -> int:
         print(f"walk: write failed: {exc}", file=sys.stderr)
         return EXIT_WRITE
     _print_summary(manifest, paths)
+    return 0
+
+
+EXIT_PAIRING = 4
+
+
+def _cmd_experiment(args: argparse.Namespace) -> int:
+    root = Path(args.root)
+    from robustlab.assets import AssetError, verify_assets
+    from robustlab.experiments.suite import (
+        SuiteConfigError,
+        check_out_dir,
+        format_summary,
+        load_suite_config,
+        run_suite,
+        sampling_record,
+    )
+
+    try:
+        config = load_suite_config(Path(args.config), trials=args.trials, seed=args.seed)
+    except (OSError, SuiteConfigError) as exc:
+        print(f"experiment: invalid config: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    if args.dry_run:
+        sampling = sampling_record(config)
+        print(f"experiment {config.name}: {sampling['kind']}, seed {config.seed}")
+        print(
+            f"rollouts: {2 * config.trials} ({config.trials} nominal + {config.trials} attacked), "
+            f"{config.horizon_s:g} s each"
+        )
+        for i, k in enumerate(sampling["start_substeps"]):
+            print(f"trial {i:>4}  start substep {k}  start {k * 0.004:.3f} s")
+        return 0
+
+    issues = verify_assets(root)
+    if issues:
+        for issue in issues:
+            print(f"FAIL  {issue}", file=sys.stderr)
+        print("experiment: asset verification failed; refusing to run", file=sys.stderr)
+        return EXIT_ASSETS
+    from robustlab.experiments.stack import load_stack
+    from robustlab.physics.model import ModelError
+    from robustlab.physics.scene import SceneError
+    from robustlab.policy.actor import PolicyError
+
+    try:
+        check_out_dir(Path(args.out), args.overwrite)
+    except FileExistsError as exc:
+        print(f"experiment: {exc} (use --overwrite)", file=sys.stderr)
+        return EXIT_WRITE
+    try:
+        stack = load_stack(root, Path(config.policy), config.scene)
+    except (PolicyError, ModelError, AssetError, SceneError, ValueError) as exc:
+        print(f"experiment: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        report = run_suite(
+            config,
+            stack,
+            Path(args.out),
+            save_trajectories=args.save_trajectories,
+            overwrite=args.overwrite,
+        )
+    except SuiteConfigError as exc:
+        print(f"experiment: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    except OSError as exc:
+        print(f"experiment: write failed: {exc}", file=sys.stderr)
+        return EXIT_WRITE
+    print(format_summary(report))
+    print(f"report           {Path(args.out) / 'experiment.json'}")
+    timing = report["timing"]
+    print(f"wall time        {timing['wall_s']:.2f} s for {timing['rollouts']} rollouts")
+    if not report["aggregates"]["paired"]["pairing_ok_all"]:
+        print("experiment: pre-attack trajectories differ between paired runs", file=sys.stderr)
+        return EXIT_PAIRING
     return 0
 
 
@@ -379,6 +410,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     walk.add_argument("--root", default=".", help="repository root (default: current dir)")
     walk.set_defaults(func=_cmd_walk)
+
+    experiment = subparsers.add_parser(
+        "experiment",
+        help="run a paired nominal-vs-shove suite over shove start times and write a report",
+    )
+    experiment.add_argument("--config", required=True, help="suite config JSON, e.g. examples/m2/")
+    experiment.add_argument("--out", required=True, help="experiment directory, e.g. runs/m2/x")
+    experiment.add_argument("--trials", type=int, help="override the config's trial count")
+    experiment.add_argument("--seed", type=int, help="override the config's seed")
+    experiment.add_argument(
+        "--save-trajectories",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="write M1-format trajectories per trial (default: on for <= 32 trials)",
+    )
+    experiment.add_argument("--overwrite", action="store_true", help="replace an existing report")
+    experiment.add_argument(
+        "--dry-run", action="store_true", help="print sampled start times without simulating"
+    )
+    experiment.add_argument("--root", default=".", help="repository root (default: current dir)")
+    experiment.set_defaults(func=_cmd_experiment)
     return parser
 
 
