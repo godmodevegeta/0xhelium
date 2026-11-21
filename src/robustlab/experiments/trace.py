@@ -1,4 +1,4 @@
-"""Write and read one M0 run: `trajectory.json` (50 Hz) and `manifest.json`.
+"""Write and read one run: `trajectory.json` (50 Hz) and `manifest.json`.
 
 Each file is written to a temporary file in the run directory, fsynced and renamed into place with
 `os.replace`. The trajectory is written first and the manifest last, so a run directory with a
@@ -26,7 +26,8 @@ import numpy as np
 
 from robustlab.experiments.walk import EpisodeRecord
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2 (M1): scene, push, fall; 1: M0 runs
+READABLE_SCHEMA_VERSIONS = (1, 2)
 TRAJECTORY_NAME = "trajectory.json"
 MANIFEST_NAME = "manifest.json"
 JOINT_ORDER_NOTE = "qpos[7:], qvel[6:], action: FR, FL, RR, RL legs x (hip, thigh, calf)"
@@ -54,6 +55,8 @@ MANIFEST_REQUIRED_KEYS = (
     "latency",
     "timing",
     "trajectory",
+    "scene",
+    "push",
 )
 
 
@@ -100,7 +103,20 @@ def trajectory_dict(record: EpisodeRecord) -> dict[str, Any]:
         "trunk_z": _jsonable(record.trunk_z),
         "finite": record.finite.tolist(),
         "warning_total": record.warning_total.tolist(),
+        **_m1_trajectory_fields(record),
     }
+
+
+def _m1_trajectory_fields(record: EpisodeRecord) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    if record.nonfoot_contact is not None:
+        fields["nonfoot_contact"] = record.nonfoot_contact.tolist()
+    if record.push_impulse is not None:
+        fields["push_impulse"] = _jsonable(record.push_impulse)
+        fields["push_impulse_note"] = "world-frame impulse applied to the trunk during Tick k, N*s"
+    if record.fall is not None:
+        fields["truncated"] = record.truncated
+    return fields
 
 
 def _atomic_write_json(path: Path, payload: Any) -> tuple[float, str]:
@@ -151,7 +167,7 @@ def read_run(run_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     trajectory = json.loads((run_dir / TRAJECTORY_NAME).read_text())
     manifest = json.loads((run_dir / MANIFEST_NAME).read_text())
     for name, doc in ((TRAJECTORY_NAME, trajectory), (MANIFEST_NAME, manifest)):
-        if doc.get("schema_version") != SCHEMA_VERSION:
+        if doc.get("schema_version") not in READABLE_SCHEMA_VERSIONS:
             raise ValueError(f"{name}: unsupported schema_version {doc.get('schema_version')!r}")
     return trajectory, manifest
 
@@ -194,7 +210,16 @@ def build_manifest(
     provenance: dict[str, Any],
     library_versions: dict[str, str],
     repo_root: Path,
+    scene: dict[str, Any] | None = None,
+    push: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if push is None:
+        perturbations = "none (xfrc_applied cleared every substep; no noise, pushes or resets)"
+    else:
+        perturbations = (
+            "one trunk push (see push); xfrc_applied cleared every substep outside it; "
+            "no noise, random pushes, command changes or resets"
+        )
     return {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
@@ -228,7 +253,9 @@ def build_manifest(
         },
         "seed": seed,
         "seed_note": "M0 episodes contain no randomness; the seed does not change results",
-        "perturbations": "none (xfrc_applied cleared every Tick; no noise, pushes or resets)",
+        "scene": scene,
+        "push": push,
+        "perturbations": perturbations,
         "criteria": criteria,
         "outcome": outcome,
         "latency": latency,
