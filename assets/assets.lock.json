@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repo": "mottopanikeiku/weeble",
+    "commit": "60878341072256ccc68f6118ec23a298c55e1bb9"
+  },
+  "files": [
+    {
+      "path": "assets/go1/walk.xml",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/walk.xml",
+      "sha256": "5f9e9cbae6732c9da3a6b6db9d6d48529ed7652d2c23ae5bda69f9191b7f162f",
+      "size": 14651
+    },
+    {
+      "path": "assets/go1/assets/calf.stl",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/assets/calf.stl",
+      "sha256": "ad3685e132454fd64e4ca3e5089f0d812fb53958e95c14913a22e3193e9e9ed8",
+      "size": 1447984
+    },
+    {
+      "path": "assets/go1/assets/hip.stl",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/assets/hip.stl",
+      "sha256": "b6599b9dd2751ebd87449203223f5683a6c235268b76fcc443e00e0d974a06c0",
+      "size": 1505284
+    },
+    {
+      "path": "assets/go1/assets/thigh.stl",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/assets/thigh.stl",
+      "sha256": "bbf7c0a441323088c59276dbec8a32e708a1c61f42d30a6f6775176366ea23f8",
+      "size": 793584
+    },
+    {
+      "path": "assets/go1/assets/thigh_mirror.stl",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/assets/thigh_mirror.stl",
+      "sha256": "1a90b89de47a57cb12a2d703f6b008a6ace8a1890a381c27723296fd0d00b9d8",
+      "size": 950834
+    },
+    {
+      "path": "assets/go1/assets/trunk.stl",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/assets/trunk.stl",
+      "sha256": "051a57995dc6f892fc9bc53cd94e9a894f3dc209fd646e94d55d764150013970",
+      "size": 5619284
+    },
+    {
+      "path": "assets/go1/LICENSE-Menagerie",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/LICENSE-Menagerie",
+      "sha256": "2b794acf1e250f5545ae5a47d81e5685ea5488ce077d1087ed8be5f81e9ba5c0",
+      "size": 1559
+    },
+    {
+      "path": "assets/go1/LICENSE-Playground",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/LICENSE-Playground",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    {
+      "path": "assets/go1/walk.provenance.json",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/assets/go1/walk.provenance.json",
+      "sha256": "257ef4e3b1d4349d6551a4f58bae5712ae21fff46d1cd545866bacbf9aab9f4c",
+      "size": 8117
+    },
+    {
+      "path": "policies/go1-walk-s0.json",
+      "url": "https://raw.githubusercontent.com/mottopanikeiku/weeble/60878341072256ccc68f6118ec23a298c55e1bb9/policies/go1-walk-s0.json",
+      "sha256": "42138b2b29663a8f72575af7354ab59b60f381446ee9e4ec2b45d83a0881a982",
+      "size": 1040617
+    }
+  ]
+}

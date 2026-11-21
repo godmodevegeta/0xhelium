@@ -50,4 +50,4 @@ Outputs are written under `runs/`, which is not tracked by git.
 
 ## License
 
-MIT, see `LICENSE`. Third-party asset notices are added in `THIRD_PARTY_NOTICES.md` (M0 Task 3.2).
+MIT, see `LICENSE`. Third-party files and their licenses are listed in `THIRD_PARTY_NOTICES.md`.
