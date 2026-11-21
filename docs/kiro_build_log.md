@@ -139,3 +139,16 @@ one writer, checked before each commit. Measured results are in `docs/milestones
 | 7 | `M1.md`, ADR 0002, README, this section | final M1 commit | ruff clean; suites as above |
 
 The Stop hook (`milestone-verification`) fast suite now takes about 7.3 s, within its 30 s timeout.
+
+## M2 — Reproducible experiment runner
+
+Spec: `.kiro/specs/experiment-runner/`. M1 merged into `main` with `--no-ff` (`4110edc`; tag
+`m1-baseline` = `fee2cc9`; no remote or PR tooling exists in this repository, so the merge was
+local). Branch `m2-experiment-runner`. Measured results are in `docs/milestones/M2.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| 1 | Spec; gait period 0.44 s measured; `hypothesis` in dev group | `07a1077` | `uv lock` resolved hypothesis 6.170.17; runtime deps unchanged |
+| 2–5 | `experiments/stack.py`, `experiments/suite.py`, `experiment` CLI, `examples/m2/`, tests | `0b57e70` | `pytest -q` 123 passed; `-m integration` 14 passed; Properties 17–19 (Hypothesis) pass |
+| 6 | 16-trial stratified suite twice, 256-start exhaustive grid | runs at `0b57e70` | 0/16 falls (Wilson [0, 0.194]), identical `results_sha256` on rerun; grid 11/256 falls |
+| 7 | `M2.md`, README, this section | final M2 commit | suites as above |
