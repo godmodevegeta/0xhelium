@@ -1,0 +1,32 @@
+{
+  "source": "runs/m0/<name>/trajectory.json recorded at m0-baseline (cfe4b13 lineage, code 02a73c5)",
+  "runs": {
+    "forward": {
+      "command": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "horizon_s": 10.0,
+      "trajectory_sha256": "1bf4dff4f136a4d21affafd80016695e07215809be0e7ab969ca4e9c4271403c",
+      "git": {
+        "commit": "02a73c5a565ca2fe8d4dc3b2d2e22a87e2792561",
+        "dirty": false
+      }
+    },
+    "zero": {
+      "command": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "horizon_s": 10.0,
+      "trajectory_sha256": "5f4f6b87fc399723401f93ff41437a1bbcfcc7196ef127d41875c62e79a1566c",
+      "git": {
+        "commit": "02a73c5a565ca2fe8d4dc3b2d2e22a87e2792561",
+        "dirty": false
+      }
+    }
+  },
+  "npz_sha256": "f77f0c6b3a5472c2f0ee94cc95e3a0e2302ef1157f6c43192b5211fa0f0dd28a"
+}
