@@ -25,7 +25,9 @@ from robustlab.experiments.suite import SuiteConfig, load_suite_config, read_rep
 from robustlab.experiments.trace import _atomic_write_json
 
 RUN_ID = re.compile(r"^ls-\d{8}T\d{6}Z-\d{1,20}$")
+DISCOVERY_ID = re.compile(r"^ds-\d{8}T\d{6}Z-(random|cmaes)-\d{1,20}$")
 LIVE_SUBDIR = "live-stress"
+DISCOVERY_SUBDIR = "discovery"
 
 
 class BusyError(Exception):
@@ -40,6 +42,7 @@ class Worker:
         self.root = root
         self.policy = policy
         self._stacks: dict[str, Stack] = {}
+        self.cache: dict[str, Any] = {}  # per-thread helpers (e.g. a PhysicsEvaluator)
 
     def stack(self, scene: str) -> Stack:  # call only from the worker thread
         if scene not in self._stacks:
@@ -66,13 +69,31 @@ class Job:
     trials: list = field(default_factory=list)
 
 
+@dataclass
+class DiscoveryJob:
+    run_id: str
+    request: dict
+    status: str = "queued"  # queued | running | done | failed
+    stage: str = "queued"  # queued | search | confirm | shrink | writing | finished
+    evaluations: list = field(default_factory=list)
+    error: str | None = None
+    cancel: threading.Event = field(default_factory=threading.Event)
+    started_utc: str | None = None
+    finished_utc: str | None = None
+
+
 def _utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 class JobManager:
     def __init__(
-        self, root: Path, runs_dir: Path, live_suite: Path, live_preset_meta: dict
+        self,
+        root: Path,
+        runs_dir: Path,
+        live_suite: Path,
+        live_preset_meta: dict,
+        discovery_timeout_s: float = 120.0,
     ) -> None:
         self.root = Path(root)
         self.runs_dir = Path(runs_dir) / LIVE_SUBDIR
@@ -82,15 +103,25 @@ class JobManager:
         self.experiments = Worker("experiment", self.root, self.live_config.policy)
         self.replays = Worker("replay", self.root, self.live_config.policy)
         self.jobs: dict[str, Job] = {}
+        self.discoveries: dict[str, DiscoveryJob] = {}
+        self.discovery_dir = Path(runs_dir) / DISCOVERY_SUBDIR
+        self.discovery_timeout_s = discovery_timeout_s
         self._lock = threading.Lock()
         self._replay_cache: OrderedDict[tuple, dict] = OrderedDict()
+
+    def _busy(self) -> bool:
+        """One expensive job (live run or discovery) at a time per server instance."""
+        active = ("queued", "running")
+        return any(j.status in active for j in self.jobs.values()) or any(
+            d.status in active for d in self.discoveries.values()
+        )
 
     # ------------------------------------------------------------------ live runs
 
     def start_live_run(self, seed: int | None) -> Job:
         with self._lock:
-            if any(j.status in ("queued", "running") for j in self.jobs.values()):
-                raise BusyError("an experiment is already running")
+            if self._busy():
+                raise BusyError("an experiment or discovery is already running")
             seed_source = "supplied" if seed is not None else "drawn"
             if seed is None:
                 seed = secrets.randbelow(2**32)
@@ -195,6 +226,147 @@ class JobManager:
                              numerical_failures=att["numerical_failures"])  # fmt: skip
             else:
                 job = self.jobs.get(run_id)
+                entry["status"] = job.status if job else "incomplete"
+            out.append(entry)
+        return out
+
+    # ------------------------------------------------------------------ discovery
+
+    def start_discovery(
+        self, algorithm: str, budget: int, seed: int | None, shrink_budget: int
+    ) -> DiscoveryJob:
+        from robustlab.search.engine import SearchConfig  # raises SearchConfigError on bad input
+
+        seed_source = "supplied" if seed is not None else "drawn"
+        if seed is None:
+            seed = secrets.randbelow(2**32)
+        config = SearchConfig(algorithm, budget, seed, shrink_budget, self.discovery_timeout_s)
+        with self._lock:
+            if self._busy():
+                raise BusyError("an experiment or discovery is already running")
+            run_id = f"ds-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{algorithm}-{seed}"
+            while run_id in self.discoveries or (self.discovery_dir / run_id).exists():
+                time.sleep(1.0)
+                run_id = f"ds-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{algorithm}-{seed}"
+            request = {
+                "schema_version": 1,
+                "run_id": run_id,
+                "algorithm": algorithm,
+                "budget": budget,
+                "seed": seed,
+                "seed_source": seed_source,
+                "shrink_budget": shrink_budget,
+                "timeout_s": self.discovery_timeout_s,
+                "requested_utc": _utc(),
+                "reproduce": (
+                    f"uv run robustlab discover --algorithm {algorithm} --budget {budget} "
+                    f"--seed {seed} --shrink-budget {shrink_budget} "
+                    f"--timeout {self.discovery_timeout_s:g} --out runs/m4/reproduce-{run_id}"
+                ),
+            }
+            job = DiscoveryJob(run_id=run_id, request=request)
+            self.discoveries[run_id] = job
+        run_dir = self.discovery_dir / run_id
+        run_dir.mkdir(parents=True)
+        _atomic_write_json(run_dir / "request.json", request)
+
+        def work(worker: Worker) -> None:
+            from robustlab.search.engine import run_discovery
+            from robustlab.search.report import write_discovery
+
+            job.status, job.started_utc = "running", _utc()
+            try:
+                stack = worker.stack("fall-contact")
+
+                def stage(name: str) -> None:
+                    job.stage = name
+
+                record = run_discovery(
+                    config,
+                    stack,
+                    cancelled=job.cancel.is_set,
+                    on_eval=job.evaluations.append,
+                    on_stage=stage,
+                )
+                record["request"] = request
+                job.stage = "writing"
+                write_discovery(run_dir, record)
+                job.status, job.stage = "done", "finished"
+            except Exception as exc:  # noqa: BLE001 - reported to the client
+                job.status, job.error = "failed", f"{type(exc).__name__}: {exc}"
+                (run_dir / "error.txt").write_text(traceback.format_exc())
+            finally:
+                job.finished_utc = _utc()
+
+        self.experiments.submit(work)
+        return job
+
+    def discovery_path(self, run_id: str) -> Path | None:
+        if not DISCOVERY_ID.match(run_id):
+            return None
+        path = self.discovery_dir / run_id
+        return path if path.is_dir() else None
+
+    def discovery_record(self, run_id: str) -> dict | None:
+        path = self.discovery_path(run_id)
+        return None if path is None else _read_json(path / "discovery.json")
+
+    def discovery_status(self, run_id: str) -> dict | None:
+        path = self.discovery_path(run_id)
+        if path is None:
+            return None
+        job = self.discoveries.get(run_id)
+        request = (job.request if job else None) or _read_json(path / "request.json") or {}
+        status: dict[str, Any] = {"run_id": run_id, "request": request}
+        record = _read_json(path / "discovery.json")
+        if record is not None and (job is None or job.status == "done"):
+            status.update(status="done", stage="finished", record=record)
+        elif job is not None:
+            status.update(
+                status=job.status,
+                stage=job.stage,
+                evaluations=list(job.evaluations),
+                completed=len(job.evaluations),
+                budget=request.get("budget"),
+                cancel_requested=job.cancel.is_set(),
+                error=job.error,
+            )
+        else:
+            status.update(status="incomplete", error="no discovery.json (server restarted?)")
+        return status
+
+    def cancel_discovery(self, run_id: str) -> bool:
+        job = self.discoveries.get(run_id)
+        if job is None or job.status not in ("queued", "running"):
+            return False
+        job.cancel.set()
+        return True
+
+    def list_discoveries(self, limit: int = 20) -> list[dict]:
+        if not self.discovery_dir.is_dir():
+            return []
+        ids = sorted(
+            (p.name for p in self.discovery_dir.iterdir() if DISCOVERY_ID.match(p.name)),
+            reverse=True,
+        )
+        out = []
+        for run_id in ids[:limit]:
+            path = self.discovery_dir / run_id
+            request = _read_json(path / "request.json") or {}
+            entry = {k: request.get(k) for k in ("algorithm", "budget", "seed", "requested_utc")}
+            entry["run_id"] = run_id
+            record = _read_json(path / "discovery.json")
+            if record:
+                final = record.get("final")
+                entry.update(
+                    status="done",
+                    stop_reason=record["search"]["stop_reason"],
+                    found_failure=record["search"]["found_failure"],
+                    final_impulse_ns=final["candidate"]["impulse_ns"] if final else None,
+                    final_source=final["source"] if final else None,
+                )
+            else:
+                job = self.discoveries.get(run_id)
                 entry["status"] = job.status if job else "incomplete"
             out.append(entry)
         return out

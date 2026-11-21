@@ -277,3 +277,13 @@ def test_quantize_direction_edges() -> None:
     assert quantize_direction(-0.04) == 0.0
     assert quantize_direction(-90) == 270.0
     assert quantize_direction(720.06) == 0.1
+
+
+def test_timeout_stops_search_and_skips_shrinking() -> None:
+    ticks = iter(range(10_000))  # each clock() call advances one second
+    fake = FakePhysics(threshold=1.0)
+    config = SearchConfig("random", budget=64, seed=0, shrink_budget=16, timeout_s=5.0)
+    record = discover(config, fake.evaluate, fake.confirm, clock=lambda: float(next(ticks)))
+    assert record["search"]["stop_reason"] == "timeout"
+    assert record["accounting"]["search_rollouts"] < 64
+    assert record["shrink"] is None
