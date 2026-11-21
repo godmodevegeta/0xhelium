@@ -282,9 +282,10 @@ function SourceBadge({ replay }: { replay: Replay }) {
     return <span className="badge live">Recorded trajectory · live run {replay.run_id} trial {replay.trial}</span>;
   }
   const v = replay.verification;
+  const what = replay.which ? `discovery record (${replay.which === "final" ? "final failure" : "search failure"})` : "M2 result";
   return (
     <span className={`badge ${v?.all_match ? "ok" : "warn"}`} title={v ? JSON.stringify(v.cases) : ""}>
-      Re-simulated now · {v?.all_match ? `matches recorded M2 result (commit ${v.recorded_commit.slice(0, 7)})` : "DOES NOT match the recorded result"}
+      Re-simulated now · {v?.all_match ? `matches recorded ${what} (commit ${v.recorded_commit.slice(0, 7)})` : "DOES NOT match the recorded result"}
     </span>
   );
 }

@@ -162,6 +162,128 @@ export interface Replay {
   run_id?: string;
   trial?: number;
   start_substep?: number;
+  which?: "final" | "search";
+}
+
+// ---------------------------------------------------------------- M4 failure discovery
+
+export interface SearchCandidate {
+  force_n: number;
+  direction_deg: number;
+  start_substep: number;
+  duration_substeps: number;
+  start_s: number;
+  duration_s: number;
+  impulse_ns: number;
+}
+
+export interface Evaluation {
+  index: number;
+  generation: number | null;
+  candidate: SearchCandidate;
+  outcome: Outcome;
+  reason: string | null;
+  fall_time_s: number | null;
+  time_after_start_s: number | null;
+  objective: number;
+  stance_at_start: string | null;
+  first_nonfoot_body: string | null;
+}
+
+export interface PairedTrialRecord {
+  stance_at_start: Record<string, boolean> | null;
+  attacked: { outcome: Outcome; reason: string | null; fall_time_s: number | null; time_after_start_s: number | null; first_nonfoot_body: string | null };
+}
+
+export interface ShrinkTest {
+  phase: string;
+  candidate: SearchCandidate;
+  outcome: Outcome;
+  status: string;
+}
+
+export interface DiscoveryRecord {
+  config: { algorithm: string; budget: number; seed: number; shrink_budget: number; timeout_s: number };
+  search: {
+    stop_reason: string;
+    found_failure: boolean;
+    candidate_failures: number;
+    numerical: number;
+    evaluations_to_first_failure: number | null;
+    best_candidate_index: number | null;
+    best_candidate_impulse_ns: number | null;
+    wall_s: number;
+    library?: string;
+  };
+  evaluations: Evaluation[];
+  confirmation: { attempts: { evaluation: number; confirmed: boolean }[]; confirmed: { evaluation: number; candidate: SearchCandidate; trial: PairedTrialRecord } | null };
+  shrink: {
+    improved: boolean;
+    start: SearchCandidate;
+    final: SearchCandidate;
+    tested: ShrinkTest[];
+    surviving_below_final: ShrinkTest[];
+    untested: string[];
+    rollouts: number;
+    confirmation_rollouts: number;
+    budget_exhausted: boolean;
+    statement: string;
+  } | null;
+  final: { source: "search" | "shrunk"; candidate: SearchCandidate; trial: PairedTrialRecord } | null;
+  accounting: Record<string, number>;
+  provenance: { git: { commit: string; dirty: boolean | null } };
+  results_sha256: string;
+  statement: string;
+  wall_s: number;
+  request?: { reproduce: string; seed_source: string };
+}
+
+export interface DiscoveryStatus {
+  run_id: string;
+  status: "queued" | "running" | "done" | "failed" | "incomplete";
+  stage: string;
+  request: { algorithm: string; budget: number; seed: number; seed_source: string; shrink_budget: number; reproduce: string };
+  evaluations?: Evaluation[];
+  completed?: number;
+  budget?: number;
+  cancel_requested?: boolean;
+  error?: string | null;
+  record?: DiscoveryRecord;
+}
+
+export interface ComparisonAggregate {
+  runs: number;
+  found_failure: number;
+  median_evaluations_to_first_failure: number | null;
+  median_search_confirmed_impulse_ns: number | null;
+  median_final_impulse_ns: number | null;
+  min_final_impulse_ns: number | null;
+  shrink_improved: number;
+  total_physics_rollouts: number;
+  median_wall_s: number;
+}
+
+export interface PairedTest {
+  pairs: number;
+  cmaes_better: number;
+  random_better: number;
+  ties: number;
+  sign_test_p_two_sided: number | null;
+}
+
+export interface DiscoveryInfo {
+  bounds: Record<string, unknown>;
+  defaults: { budget: number; shrink_budget: number };
+  limits: { budget: { min: number; max: number; multiple_of: number }; shrink_budget: { min: number; max: number }; timeout_s: number };
+  comparison: {
+    result_origin: string;
+    protocol: { seeds: number[]; budget: number; shrink_budget: number };
+    aggregate: { random: ComparisonAggregate; cmaes: ComparisonAggregate };
+    paired: Record<string, PairedTest>;
+    found_failure_fisher_p_two_sided: number;
+    git: { commit: string };
+  };
+  runs: { run_id: string; algorithm: string; budget: number; seed: number; status: string; found_failure?: boolean; final_impulse_ns?: number | null; final_source?: string | null; stop_reason?: string }[];
 }
 
 export class ApiError extends Error {}
@@ -195,6 +317,18 @@ export const api = {
   run: (runId: string) => request<RunStatus>(`/api/runs/${encodeURIComponent(runId)}`),
   runReplay: (runId: string, trial: number) =>
     request<Replay>(`/api/runs/${encodeURIComponent(runId)}/trials/${trial}/replay`),
+  discoveryInfo: () => request<DiscoveryInfo>("/api/discovery"),
+  startDiscovery: (body: { algorithm: string; budget: number; seed: number | null; shrink_budget: number }) =>
+    request<{ run_id: string }>("/api/discovery/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body.seed === null ? { algorithm: body.algorithm, budget: body.budget, shrink_budget: body.shrink_budget } : body),
+    }),
+  discoveryStatus: (runId: string) => request<DiscoveryStatus>(`/api/discovery/runs/${encodeURIComponent(runId)}`),
+  cancelDiscovery: (runId: string) =>
+    request<{ cancel_requested: boolean }>(`/api/discovery/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }),
+  discoveryReplay: (runId: string, which: "final" | "search") =>
+    request<Replay>(`/api/discovery/runs/${encodeURIComponent(runId)}/replay?which=${which}`),
 };
 
 export function decodeFloat32(b64: string): Float32Array {
