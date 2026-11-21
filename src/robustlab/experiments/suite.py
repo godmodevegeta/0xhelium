@@ -15,6 +15,7 @@ import re
 import shutil
 import statistics
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -532,6 +533,41 @@ def sampling_record(config: SuiteConfig) -> dict:
     }
 
 
+def run_trial(
+    config: SuiteConfig,
+    runner: EpisodeRunner,
+    index: int,
+    start_substep: int,
+    stratum,
+    criteria: WalkCriteria,
+):
+    """One paired trial: nominal and shoved episodes. Returns (trial record, (nominal record,
+    nominal outcome), (attacked record, attacked outcome)). Used by `run_suite` and for
+    re-simulating a single recorded trial."""
+    push = config.push_at(start_substep)
+    nominal = runner.run(EpisodeConfig(config.command, config.horizon_s, config.seed))
+    nominal_out = evaluate(nominal, criteria)
+    attacked = runner.run(EpisodeConfig(config.command, config.horizon_s, config.seed, push))
+    attacked_out = evaluate(attacked, criteria)
+    nom = episode_summary(nominal, nominal_out, None)
+    att = episode_summary(attacked, attacked_out, push.start_s)
+    paired = pre_attack_parity(nominal, attacked, push.start_s)
+    paired["progress_difference_m"] = att["forward_progress_m"] - nom["forward_progress_m"]
+    trial = {
+        "trial": index,
+        "start_substep": start_substep,
+        "start_s": push.start_s,
+        "stratum_substeps": list(stratum),
+        "push": attacked.push,
+        "stance_at_start": stance_at(nominal, push.start_s),
+        "nominal": nom,
+        "attacked": att,
+        "paired": paired,
+        "trajectories": None,
+    }
+    return trial, (nominal, nominal_out), (attacked, attacked_out)
+
+
 def check_out_dir(out_dir: Path, overwrite: bool) -> None:
     if (Path(out_dir) / REPORT_NAME).exists() and not overwrite:
         raise FileExistsError(f"{Path(out_dir) / REPORT_NAME} exists; use overwrite")
@@ -545,8 +581,10 @@ def run_suite(
     save_trajectories: bool | None = None,
     overwrite: bool = False,
     criteria: WalkCriteria | None = None,
+    on_trial: Callable[[int, dict], None] | None = None,
 ) -> dict:
-    """Run every trial, write trajectories (optional) and `experiment.json`; return the report."""
+    """Run every trial, write trajectories (optional) and `experiment.json`; return the report.
+    `on_trial(i, trial)` is called after each trial (progress reporting)."""
     out_dir = Path(out_dir)
     check_out_dir(out_dir, overwrite)
     criteria = criteria or WalkCriteria()
@@ -565,27 +603,9 @@ def run_suite(
     trials: list[dict] = []
     wall = time.perf_counter()
     for i, (k, stratum) in enumerate(zip(sampling["start_substeps"], sampling["strata"])):
-        push = config.push_at(k)
-        nominal = runner.run(EpisodeConfig(config.command, config.horizon_s, config.seed))
-        nominal_out = evaluate(nominal, criteria)
-        attacked = runner.run(EpisodeConfig(config.command, config.horizon_s, config.seed, push))
-        attacked_out = evaluate(attacked, criteria)
-        nom = episode_summary(nominal, nominal_out, None)
-        att = episode_summary(attacked, attacked_out, push.start_s)
-        paired = pre_attack_parity(nominal, attacked, push.start_s)
-        paired["progress_difference_m"] = att["forward_progress_m"] - nom["forward_progress_m"]
-        trial = {
-            "trial": i,
-            "start_substep": k,
-            "start_s": push.start_s,
-            "stratum_substeps": stratum,
-            "push": attacked.push,
-            "stance_at_start": stance_at(nominal, push.start_s),
-            "nominal": nom,
-            "attacked": att,
-            "paired": paired,
-            "trajectories": None,
-        }
+        trial, (nominal, nominal_out), (attacked, attacked_out) = run_trial(
+            config, runner, i, k, stratum, criteria
+        )
         if save_trajectories:
             paths = {}
             for case, record, outcome in (
@@ -607,6 +627,8 @@ def run_suite(
                 paths[case] = rel
             trial["trajectories"] = paths
         trials.append(trial)
+        if on_trial is not None:
+            on_trial(i, trial)
     wall = time.perf_counter() - wall
 
     aggregates = aggregate(trials, config.attack.start.method)

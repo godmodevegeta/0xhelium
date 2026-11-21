@@ -1,0 +1,15 @@
+{
+  "id": "live-stress",
+  "version": 1,
+  "title": "Live Stress Test",
+  "files": {
+    "suite.json": "29573c73548f90efba9c3f467ca40b51698b2c4508b631d6d2c900a89a57b06b",
+    "reference-grid-256.json": "3856127a41cf79486cb8c88eb5680a0c0abe6a8e3da9446eb5a2d4169293078b"
+  },
+  "source": {
+    "reference_command": "uv run python scripts/force_sweep.py (150 N, grid-all-256)",
+    "reference_git_commit": "c682baac922234511d74b0f27a530b4b9af878ea",
+    "milestone": "M3 force sweep",
+    "selection": "150 N: the only force in 110-150 N with an exhaustive frequency in 25-75% (65/256 = 25.4%)"
+  }
+}

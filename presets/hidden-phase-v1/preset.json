@@ -1,0 +1,17 @@
+{
+  "id": "hidden-phase",
+  "version": 1,
+  "title": "Hidden Phase Vulnerability",
+  "files": {
+    "experiment.json": "70b406327fc6665364a64ac503678f8744813e03db33301c849235721712df73"
+  },
+  "source": {
+    "command": "uv run robustlab experiment --config examples/m2/sideways-shove-grid-all-256.json --out runs/m2/grid-all-256",
+    "config": "examples/m2/sideways-shove-grid-all-256.json",
+    "config_sha256": "4c2ad23461a12a0894329387dd15e67dfef68d83af81d335a3f0367c12c2e4f9",
+    "git_commit": "0b57e70444cfc44162d759156bfaf79889f7af52",
+    "milestone": "M2"
+  },
+  "verified_failure_substep": 500,
+  "verified_failure_note": "2.000 s: the M1 demonstration timing; tests/test_integration_api.py re-simulates it and requires matching digests"
+}

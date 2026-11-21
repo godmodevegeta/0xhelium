@@ -45,6 +45,10 @@ extend-exclude = [".kiro", "tests/reference/weeble_sim.py"]  # oracle stays byte
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not integration'"
+filterwarnings = [
+    # starlette 1.x TestClient deprecation of httpx; affects tests only
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
 markers = [
     "integration: slower native MuJoCo rollouts; deselected by default, run with -m integration",
 ]

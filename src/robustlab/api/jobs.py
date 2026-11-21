@@ -1,0 +1,232 @@
+"""Bounded background execution: one experiment worker and one replay worker.
+
+Each worker is a single thread that owns its own `Stack` (the NumPy actor has preallocated buffers,
+so a stack is never shared between threads). Job state is in memory; the run directory is the
+durable record: `request.json` is written before simulating and `experiment.json` last.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import secrets
+import threading
+import time
+import traceback
+from collections import OrderedDict
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from robustlab.experiments.stack import Stack, load_stack
+from robustlab.experiments.suite import SuiteConfig, load_suite_config, read_report, run_suite
+from robustlab.experiments.trace import _atomic_write_json
+
+RUN_ID = re.compile(r"^ls-\d{8}T\d{6}Z-\d{1,20}$")
+LIVE_SUBDIR = "live-stress"
+
+
+class BusyError(Exception):
+    """An experiment is already queued or running."""
+
+
+class Worker:
+    """Single-thread executor with a lazily loaded Stack per scene, used only on that thread."""
+
+    def __init__(self, name: str, root: Path, policy: str) -> None:
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=name)
+        self.root = root
+        self.policy = policy
+        self._stacks: dict[str, Stack] = {}
+
+    def stack(self, scene: str) -> Stack:  # call only from the worker thread
+        if scene not in self._stacks:
+            self._stacks[scene] = load_stack(self.root, Path(self.policy), scene)
+        return self._stacks[scene]
+
+    def submit(self, fn: Callable[[Worker], Any]) -> Future:
+        return self.executor.submit(fn, self)
+
+    def shutdown(self) -> None:
+        self.executor.shutdown(wait=False, cancel_futures=True)
+
+
+@dataclass
+class Job:
+    run_id: str
+    seed: int
+    total: int
+    status: str = "queued"  # queued | running | done | failed
+    completed: int = 0
+    error: str | None = None
+    started_utc: str | None = None
+    finished_utc: str | None = None
+    trials: list = field(default_factory=list)
+
+
+def _utc() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+class JobManager:
+    def __init__(
+        self, root: Path, runs_dir: Path, live_suite: Path, live_preset_meta: dict
+    ) -> None:
+        self.root = Path(root)
+        self.runs_dir = Path(runs_dir) / LIVE_SUBDIR
+        self.live_suite = Path(live_suite)
+        self.live_config: SuiteConfig = load_suite_config(self.live_suite)
+        self.live_preset_meta = live_preset_meta
+        self.experiments = Worker("experiment", self.root, self.live_config.policy)
+        self.replays = Worker("replay", self.root, self.live_config.policy)
+        self.jobs: dict[str, Job] = {}
+        self._lock = threading.Lock()
+        self._replay_cache: OrderedDict[tuple, dict] = OrderedDict()
+
+    # ------------------------------------------------------------------ live runs
+
+    def start_live_run(self, seed: int | None) -> Job:
+        with self._lock:
+            if any(j.status in ("queued", "running") for j in self.jobs.values()):
+                raise BusyError("an experiment is already running")
+            seed_source = "supplied" if seed is not None else "drawn"
+            if seed is None:
+                seed = secrets.randbelow(2**32)
+            config = load_suite_config(self.live_suite, seed=seed)
+            run_id = f"ls-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{seed}"
+            while run_id in self.jobs or (self.runs_dir / run_id).exists():
+                time.sleep(1.0)
+                run_id = f"ls-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{seed}"
+            job = Job(run_id=run_id, seed=seed, total=config.trials)
+            self.jobs[run_id] = job
+        run_dir = self.runs_dir / run_id
+        run_dir.mkdir(parents=True)
+        _atomic_write_json(
+            run_dir / "request.json",
+            {
+                "schema_version": 1,
+                "run_id": run_id,
+                "preset": {k: self.live_preset_meta[k] for k in ("id", "version", "files")},
+                "suite_config": str(self.live_suite.relative_to(self.root))
+                if self.live_suite.is_relative_to(self.root)
+                else str(self.live_suite),
+                "seed": seed,
+                "seed_source": seed_source,
+                "requested_utc": _utc(),
+                "reproduce": self.reproduce_command(seed),
+            },
+        )
+
+        def work(worker: Worker) -> None:
+            job.status, job.started_utc = "running", _utc()
+            try:
+                stack = worker.stack(config.scene)
+
+                def progress(i: int, trial: dict) -> None:
+                    job.completed = i + 1
+                    job.trials.append(trial)
+
+                run_suite(config, stack, run_dir, save_trajectories=True, on_trial=progress)
+                job.status = "done"
+            except Exception as exc:  # noqa: BLE001 - reported to the client, never swallowed
+                job.status, job.error = "failed", f"{type(exc).__name__}: {exc}"
+                (run_dir / "error.txt").write_text(traceback.format_exc())
+            finally:
+                job.finished_utc = _utc()
+
+        self.experiments.submit(work)
+        return job
+
+    def reproduce_command(self, seed: int) -> str:
+        suite = (
+            self.live_suite.relative_to(self.root)
+            if self.live_suite.is_relative_to(self.root)
+            else self.live_suite
+        )
+        return (
+            f"uv run robustlab experiment --config {suite} --seed {seed} "
+            f"--out runs/m2/reproduce-{seed}"
+        )
+
+    def run_dir(self, run_id: str) -> Path | None:
+        if not RUN_ID.match(run_id):
+            return None
+        path = self.runs_dir / run_id
+        return path if path.is_dir() else None
+
+    def run_status(self, run_id: str) -> dict | None:
+        path = self.run_dir(run_id)
+        if path is None:
+            return None
+        job = self.jobs.get(run_id)
+        request = _read_json(path / "request.json") or {}
+        status: dict[str, Any] = {"run_id": run_id, "seed": request.get("seed"),
+                                  "seed_source": request.get("seed_source"),
+                                  "requested_utc": request.get("requested_utc"),
+                                  "reproduce": request.get("reproduce")}  # fmt: skip
+        if (path / "experiment.json").exists() and (job is None or job.status == "done"):
+            status.update(status="done", report=read_report(path))
+        elif job is not None:
+            status.update(status=job.status, completed=job.completed, total=job.total,
+                          error=job.error, trials=list(job.trials))  # fmt: skip
+        else:
+            status.update(status="incomplete", error="no experiment.json (server restarted?)")
+        return status
+
+    def list_runs(self, limit: int = 20) -> list[dict]:
+        if not self.runs_dir.is_dir():
+            return []
+        ids = sorted(
+            (p.name for p in self.runs_dir.iterdir() if RUN_ID.match(p.name)), reverse=True
+        )
+        out = []
+        for run_id in ids[:limit]:
+            path = self.runs_dir / run_id
+            request = _read_json(path / "request.json") or {}
+            entry = {"run_id": run_id, "seed": request.get("seed"),
+                     "requested_utc": request.get("requested_utc")}  # fmt: skip
+            report = _read_json(path / "experiment.json")
+            if report:
+                att = report["aggregates"]["attacked"]
+                entry.update(status="done", physical_falls=att["physical_falls"],
+                             valid_trials=att["valid_trials"],
+                             numerical_failures=att["numerical_failures"])  # fmt: skip
+            else:
+                job = self.jobs.get(run_id)
+                entry["status"] = job.status if job else "incomplete"
+            out.append(entry)
+        return out
+
+    # ------------------------------------------------------------------ replays
+
+    def replay(self, key: tuple, compute: Callable[[Worker], dict]) -> Future:
+        """Run `compute` on the replay worker, caching up to 32 results by `key`."""
+        with self._lock:
+            if key in self._replay_cache:
+                self._replay_cache.move_to_end(key)
+                done: Future = Future()
+                done.set_result(self._replay_cache[key])
+                return done
+
+        def run(worker: Worker) -> dict:
+            result = compute(worker)
+            with self._lock:
+                self._replay_cache[key] = result
+                while len(self._replay_cache) > 32:
+                    self._replay_cache.popitem(last=False)
+            return result
+
+        return self.replays.submit(run)
+
+    def shutdown(self) -> None:
+        self.experiments.shutdown()
+        self.replays.shutdown()
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
