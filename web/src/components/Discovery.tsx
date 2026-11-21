@@ -230,7 +230,13 @@ function SearchPlot({ evaluations, budget, record }: { evaluations: Evaluation[]
   );
 }
 
-function FailureRow({ label, kind, c, trial }: { label: string; kind: string; c: SearchCandidate; trial?: PairedTrialRecord | null }) {
+function FailureRow({ label, kind, c, trial, evaluation }: { label: string; kind: string; c: SearchCandidate; trial?: PairedTrialRecord | null; evaluation?: Evaluation }) {
+  const stance = trial ? stanceText(trial.stance_at_start) : evaluation?.stance_at_start ?? "—";
+  const fall = trial
+    ? `${trial.attacked.reason} @ ${fmt(trial.attacked.fall_time_s)} s`
+    : evaluation
+      ? `${evaluation.reason} @ ${fmt(evaluation.fall_time_s)} s`
+      : "—";
   return (
     <tr>
       <td><strong>{label}</strong><div className="muted small">{kind}</div></td>
@@ -239,8 +245,8 @@ function FailureRow({ label, kind, c, trial }: { label: string; kind: string; c:
       <td>{c.start_s.toFixed(3)} s</td>
       <td>{(c.duration_s * 1000).toFixed(0)} ms</td>
       <td><strong>{c.impulse_ns.toFixed(2)}</strong></td>
-      <td>{trial ? stanceText(trial.stance_at_start) : "—"}</td>
-      <td>{trial ? `${trial.attacked.reason} @ ${fmt(trial.attacked.fall_time_s)} s` : "—"}</td>
+      <td>{stance}</td>
+      <td>{fall}</td>
     </tr>
   );
 }
@@ -263,7 +269,7 @@ function Result({ record, onReplay, replaying, runId }: { record: DiscoveryRecor
         <table className="failures">
           <thead><tr><th /><th>Force</th><th>Direction</th><th>Start</th><th>Duration</th><th>Impulse N·s</th><th>Stance</th><th>Fall</th></tr></thead>
           <tbody>
-            {best && <FailureRow label="Best candidate" kind={`evaluation #${best.index}, single rollout`} c={best.candidate} />}
+            {best && <FailureRow label="Best candidate" kind={`evaluation #${best.index}, single rollout`} c={best.candidate} evaluation={best} />}
             {confirmed ? <FailureRow label="Confirmed" kind={`paired re-simulation of #${confirmed.evaluation}`} c={confirmed.candidate} trial={confirmed.trial} /> : <tr><td colSpan={8} className="bad">Candidate could not be confirmed.</td></tr>}
             {shrink && shrink.improved && record.final && <FailureRow label="Shrunk" kind="confirmed lower-impulse failure" c={record.final.candidate} trial={record.final.trial} />}
           </tbody>
