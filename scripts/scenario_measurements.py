@@ -64,7 +64,7 @@ def single_row(result: dict) -> dict:
         else {
             k: result["cases"]["matched"][k]
             for k in ("outcome", "forward_progress_m", "max_tilt_deg")
-        },  # fmt: skip
+        },
         "results_sha256": result["results_sha256"],
     }
 
