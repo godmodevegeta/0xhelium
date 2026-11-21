@@ -78,6 +78,7 @@ class Policy:
     sensors: dict[str, str]
     model_parameters: dict[str, Any]
     versions: dict[str, str]
+    command_ranges: tuple[tuple[float, float], ...]  # trained [lo, hi] for vx, vy, yaw rate
 
     @property
     def obs_dim(self) -> int:
@@ -241,7 +242,25 @@ def parse_policy(doc: Any, sha256: str) -> Policy:
         sensors=dict(_get(doc, "sensors")),
         model_parameters=_get(doc, "model_parameters"),
         versions=dict(_get(doc, "versions")),
+        command_ranges=_command_ranges(_get(doc, "command_ranges")),
     )
+
+
+def _command_ranges(value: Any) -> tuple[tuple[float, float], ...]:
+    ok = isinstance(value, list) and len(value) == 3
+    ranges = []
+    for pair in value if ok else []:
+        if not (isinstance(pair, list) and len(pair) == 2):
+            ok = False
+            break
+        lo, hi = (float(x) for x in pair)
+        if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+            ok = False
+            break
+        ranges.append((lo, hi))
+    if not ok:
+        raise PolicyError("command_ranges", "expected three finite [lo, hi] pairs")
+    return tuple(ranges)
 
 
 def load_policy(path: Path, expected_sha256: str) -> Policy:
