@@ -10,6 +10,7 @@ import argparse
 import platform
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from robustlab import __version__
 
@@ -63,6 +64,28 @@ def _cmd_doctor(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_verify_assets(args: argparse.Namespace) -> int:
+    from robustlab.assets import AssetError, verified_paths, verify_assets
+
+    root = Path(args.root)
+    issues = verify_assets(root)
+    try:
+        paths = verified_paths(root)
+    except AssetError:
+        paths = []
+    failed = {issue.path for issue in issues}
+    for relpath in paths:
+        if relpath not in failed:
+            print(f"OK    {relpath}")
+    for issue in issues:
+        print(f"FAIL  {issue}")
+    if issues:
+        print(f"verify-assets: {len(issues)} issue(s)", file=sys.stderr)
+        return 1
+    print(f"verify-assets: all {len(paths)} files match the lock and provenance")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="robustlab",
@@ -76,6 +99,13 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor", help="print Python, NumPy, MuJoCo, platform and NumPy BLAS information"
     )
     doctor.set_defaults(func=_cmd_doctor)
+
+    verify = subparsers.add_parser(
+        "verify-assets",
+        help="check pinned assets against assets/assets.lock.json and walk.provenance.json",
+    )
+    verify.add_argument("--root", default=".", help="repository root (default: current dir)")
+    verify.set_defaults(func=_cmd_verify_assets)
     return parser
 
 
