@@ -45,6 +45,9 @@ export function ReplayViewer({ model, replay, title }: Props) {
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(0.5);
   const frameRef = useRef(0);
+  // Continuous playhead in seconds. The displayed frame is derived from it; keeping the
+  // fractional time is what lets slow speeds advance (0.5x at 60 Hz adds 0.42 frames per render).
+  const timeRef = useRef(0);
   const playingRef = useRef(true);
   const speedRef = useRef(0.5);
   const geometries = useMemo(() => buildGeometries(model), [model]);
@@ -118,16 +121,15 @@ export function ReplayViewer({ model, replay, title }: Props) {
     };
 
     let last = performance.now();
-    let clock = 0;
     let raf = 0;
     let previousTarget = trunk(robots[1], 0);
     const loop = (now: number) => {
-      const dt = (now - last) / 1000;
+      const dt = Math.min((now - last) / 1000, 0.1); // a hidden tab must not jump the playhead
       last = now;
       if (playingRef.current) {
-        clock = frameRef.current / replay.fps + dt * speedRef.current;
-        if (clock > duration) clock = 0;
-        const f = Math.round(clock * replay.fps);
+        timeRef.current += dt * speedRef.current;
+        if (timeRef.current > duration) timeRef.current = 0; // loop
+        const f = Math.min(replay.frames - 1, Math.floor(timeRef.current * replay.fps + 1e-9));
         if (f !== frameRef.current) {
           frameRef.current = f;
           setFrame(f);
@@ -178,13 +180,20 @@ export function ReplayViewer({ model, replay, title }: Props) {
     const requested = Number(new URLSearchParams(window.location.search).get("frame"));
     const start = Number.isInteger(requested) && requested > 0 ? Math.min(requested, replay.frames - 1) : 0;
     frameRef.current = start;
+    timeRef.current = start / replay.fps;
     setFrame(start);
     setPlaying(start === 0);
   }, [replay]);
 
   const seek = (f: number) => {
     frameRef.current = f;
+    timeRef.current = f / replay.fps;
     setFrame(f);
+  };
+  const togglePlay = () => {
+    // Play at the last frame restarts from the beginning instead of sitting on the end.
+    if (!playing && frameRef.current >= replay.frames - 1) seek(0);
+    setPlaying((p) => !p);
   };
   const att = replay.cases.attacked;
   const nom = replay.cases.nominal;
@@ -224,7 +233,7 @@ export function ReplayViewer({ model, replay, title }: Props) {
         <div className="tl-cursor" style={{ left: pctOf(t) }} />
       </div>
       <div className="controls">
-        <button onClick={() => setPlaying((p) => !p)}>{playing ? "Pause" : "Play"}</button>
+        <button onClick={togglePlay}>{playing ? "Pause" : "Play"}</button>
         <input type="range" min={0} max={replay.frames - 1} value={frame} onChange={(e) => { setPlaying(false); seek(Number(e.target.value)); }} />
         <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
           {[0.1, 0.25, 0.5, 1].map((s) => <option key={s} value={s}>{s}×</option>)}
