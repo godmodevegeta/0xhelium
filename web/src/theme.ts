@@ -9,7 +9,7 @@ export const PALETTE = {
   borderStrong: "#34332f",
   text: "#ededeb",
   muted: "#a3a19c",
-  faint: "#6f6d68",
+  faint: "#84827c",
   accent: "#ff5b35", // attack cue and primary action
   ok: "#d7f25d", // survived
   fell: "#ff4f6e", // physical fall (distinct from the orange attack cue)
