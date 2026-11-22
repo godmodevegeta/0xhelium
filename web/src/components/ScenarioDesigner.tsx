@@ -1,0 +1,542 @@
+// Scenario Designer (M5): compose friction, payload and push; optionally compile a description with
+// OpenRouter. Every value shown as "validated" comes back from the server's validator; the browser
+// never clamps or edits values on its own, and all outcomes come from server-side MuJoCo runs.
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  api,
+  ApiError,
+  COLORS,
+  fmt,
+  pct,
+  type CaseSummary,
+  type CompileResponse,
+  type FieldError,
+  type ScenarioConfig,
+  type ScenarioDoc,
+  type ScenarioPreview,
+  type ScenarioPush,
+  type ScenarioStatus,
+  type ValidateResponse,
+} from "../api";
+
+type Ghost = "primary" | "matched" | "original";
+
+interface Props {
+  config: ScenarioConfig;
+  onReplay: (runId: string, trial: number, ghost: Ghost, title: string) => void;
+  onRefresh: () => void;
+  replaying: string | null;
+}
+
+const DEFAULT_PUSH: ScenarioPush = { force_n: 100, direction_deg: 270, start_s: 2.0, duration_s: 0.1 };
+const DIRECTIONS: { label: string; deg: number }[] = [
+  { label: "from the left (pushes right)", deg: 270 },
+  { label: "from the right (pushes left)", deg: 90 },
+  { label: "from behind (pushes forward)", deg: 0 },
+  { label: "from the front (pushes back)", deg: 180 },
+];
+
+const clone = (doc: ScenarioDoc): ScenarioDoc => JSON.parse(JSON.stringify(doc)) as ScenarioDoc;
+
+export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Props) {
+  const initial = config.presets.find((p) => p.id === "icy-heavy-shove") ?? config.presets[0];
+  const [doc, setDoc] = useState<ScenarioDoc>(() => clone(initial.scenario));
+  const [presetId, setPresetId] = useState<string | null>(initial.id);
+  const lastPush = useRef<ScenarioPush>(initial.scenario.push ?? DEFAULT_PUSH);
+  const [preview, setPreview] = useState<{ key: string; data: ValidateResponse } | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [compiling, setCompiling] = useState(false);
+  const [compiled, setCompiled] = useState<CompileResponse | null>(null);
+  const [compileError, setCompileError] = useState<string | null>(null);
+  const [compileId, setCompileId] = useState<string | null>(null);
+  const [status, setStatus] = useState<ScenarioStatus | null>(null);
+  const [seedText, setSeedText] = useState("");
+  const [ghost, setGhost] = useState<"matched" | "original">("matched");
+  const [error, setError] = useState<string | null>(null);
+  const timer = useRef<number | null>(null);
+  const key = JSON.stringify(doc);
+  const compiler = config.compiler;
+
+  // Server-side validation of the current form, debounced.
+  useEffect(() => {
+    setValidating(true);
+    const handle = window.setTimeout(() => {
+      api
+        .validateScenario(JSON.parse(key) as ScenarioDoc)
+        .then((data) => setPreview({ key, data }))
+        .catch((e) => setPreview({ key, data: { valid: false, errors: [{ field: "request", reason: String(e) }] } }))
+        .finally(() => setValidating(false));
+    }, 350);
+    return () => window.clearTimeout(handle);
+  }, [key]);
+
+  useEffect(() => {
+    const runId = new URLSearchParams(window.location.search).get("run"); // deep link to a run
+    if (runId && /^sc-\d{8}T\d{6}Z-[0-9a-f]{8}$/.test(runId)) poll(runId);
+    return () => { if (timer.current) window.clearTimeout(timer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const update = (change: (d: ScenarioDoc) => void) => {
+    setDoc((current) => {
+      const next = clone(current);
+      change(next);
+      return next;
+    });
+    setPresetId(null);
+  };
+  const loadPreset = (id: string) => {
+    const preset = config.presets.find((p) => p.id === id);
+    if (!preset) return;
+    setDoc(clone(preset.scenario));
+    if (preset.scenario.push) lastPush.current = preset.scenario.push;
+    setPresetId(id);
+    setCompileId(null);
+    setCompiled(null);
+  };
+
+  const compile = async (text: string) => {
+    setCompiling(true);
+    setCompileError(null);
+    setCompiled(null);
+    try {
+      const result = await api.compileScenario(text);
+      setCompiled(result);
+      if (result.valid && result.scenario) {
+        setDoc(clone(result.scenario));
+        if (result.scenario.push) lastPush.current = result.scenario.push;
+        setPresetId(null);
+        setCompileId(result.compile_id);
+      }
+    } catch (e) {
+      setCompileError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setCompiling(false);
+    }
+  };
+
+  const poll = useCallback(
+    (runId: string) => {
+      const tick = async () => {
+        try {
+          const s = await api.scenarioStatus(runId);
+          setStatus(s);
+          if (s.status === "queued" || s.status === "running") timer.current = window.setTimeout(tick, 300);
+          else onRefresh();
+        } catch (e) {
+          setError(String(e));
+        }
+      };
+      void tick();
+    },
+    [onRefresh],
+  );
+
+  const run = async (mode: "single" | "suite") => {
+    setError(null);
+    const seed = seedText.trim() === "" ? undefined : Number(seedText);
+    if (seed !== undefined && (!Number.isInteger(seed) || seed < 0)) {
+      setError("Seed must be a non-negative integer, or blank for a fresh random seed.");
+      return;
+    }
+    try {
+      const started = await api.startScenario({
+        scenario: doc,
+        mode,
+        ...(mode === "suite" ? { trials: config.suite_defaults.trials, ...(seed !== undefined ? { seed } : {}) } : {}),
+        ...(compileId ? { compile_id: compileId } : {}),
+      });
+      setStatus({ run_id: started.run_id, status: "queued", request: started.request, completed: 0, total: mode === "suite" ? config.suite_defaults.trials : 1 });
+      setGhost("matched");
+      poll(started.run_id);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const current = preview && preview.key === key ? preview.data : null;
+  const valid = current?.valid ? (current as ScenarioPreview) : null;
+  const running = status?.status === "queued" || status?.status === "running";
+  const canRun = valid !== null && !validating && !running;
+  const mu = doc.environment.ground_friction_mu;
+  const push = doc.push;
+
+  return (
+    <section>
+      <div className="hero">
+        <div>
+          <div className="eyebrow">Scenario Designer · friction × payload × push</div>
+          <h2>Compose a physical condition, check it, then simulate it</h2>
+          <p>
+            Change the floor friction, weld a payload box to the trunk, and optionally add a timed shove. The server validates every
+            value against fixed bounds (out-of-range values are rejected, never clamped), compiles the MuJoCo model and reports the
+            friction MuJoCo actually resolves at the feet before anything runs. Optional: describe the condition in words and let
+            an OpenRouter model propose the values, which go through the same validator.
+          </p>
+        </div>
+      </div>
+
+      <div className="designer-grid">
+        <div>
+          <div className="card">
+            <div className="sweep-head">
+              <h3>Describe it (optional)</h3>
+              {compiler.configured ? (
+                <span className="badge ok">OpenRouter configured · {compiler.model}</span>
+              ) : (
+                <span className="badge warn">OpenRouter not configured (OPENROUTER_API_KEY unset on the server)</span>
+              )}
+            </div>
+            <textarea
+              className="prompt"
+              maxLength={compiler.limits.max_prompt_chars}
+              placeholder="e.g. sideways push from the left while walking on wet tile"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              disabled={!compiler.configured || compiling}
+            />
+            <div className="examples">
+              {config.examples.map((ex) => (
+                <button key={ex} onClick={() => setPrompt(ex)} disabled={!compiler.configured || compiling}>{ex}</button>
+              ))}
+            </div>
+            <div className="row">
+              <button className="primary" onClick={() => void compile(prompt)} disabled={!compiler.configured || compiling || prompt.trim() === ""}>
+                {compiling ? "Compiling…" : "Compile with OpenRouter"}
+              </button>
+              <span className="muted small">
+                {compiler.configured
+                  ? `The model only proposes JSON values; the server validates them. ≤ ${compiler.limits.max_prompt_chars} chars, ${compiler.limits.timeout_s} s timeout.`
+                  : "Presets and the manual fields below work without a key."}
+              </span>
+            </div>
+            {compileError && <p className="error">Compile failed: {compileError}. Nothing was changed.</p>}
+            {compiled && <CompileResult result={compiled} />}
+          </div>
+
+          <div className="card">
+            <div className="sweep-head">
+              <h3>Parameters</h3>
+              <div className="examples">
+                {config.presets.map((p) => (
+                  <button key={p.id} className={presetId === p.id ? "tab active" : ""} onClick={() => loadPreset(p.id)} title={p.note}>{p.id}</button>
+                ))}
+              </div>
+            </div>
+            {compileId && <p className="muted small">Values came from OpenRouter compile {compileId}; edits are recorded as "edited after compile".</p>}
+
+            <fieldset>
+              <legend>Ground friction μ</legend>
+              <div className="param-row">
+                <label className="radio"><input type="checkbox" checked={mu === null} onChange={(e) => update((d) => { d.environment.ground_friction_mu = e.target.checked ? null : config.nominal_mu; })} /> trained floor ({config.nominal_mu})</label>
+              </div>
+              {mu !== null && (
+                <NumberSlider value={mu} bounds={config.bounds["environment.ground_friction_mu"]} step={0.01} unit="" onChange={(v) => update((d) => { d.environment.ground_friction_mu = v; })} />
+              )}
+              <div className="muted small">Sets the floor geom's sliding friction; MuJoCo resolves every floor contact with the floor's value (higher priority).</div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Payload (welded box on the trunk)</legend>
+              <NumberSlider label="mass" value={doc.payload.mass_kg} bounds={config.bounds["payload.mass_kg"]} step={0.1} unit="kg" onChange={(v) => update((d) => { d.payload.mass_kg = v; })} />
+              {(["x forward", "y left", "z up"] as const).map((axis, i) => (
+                <NumberSlider key={axis} label={`CoM ${axis}`} value={doc.payload.offset_xyz_m[i]} bounds={config.bounds[`payload.offset_xyz_m[${i}]`]} step={0.005} unit="m" onChange={(v) => update((d) => { d.payload.offset_xyz_m[i] = v; })} disabled={doc.payload.mass_kg === 0} />
+              ))}
+              <div className="muted small">Offset is relative to the trunk centre of mass, in trunk axes. At 0 kg no body is added (the original model is used).</div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Push (trunk force, initial-heading frame)</legend>
+              <div className="param-row">
+                <label className="radio">
+                  <input type="checkbox" checked={push !== null} onChange={(e) => update((d) => { if (e.target.checked) d.push = { ...lastPush.current }; else { if (d.push) lastPush.current = d.push; d.push = null; } })} /> apply a push
+                </label>
+              </div>
+              {push && (
+                <>
+                  <NumberSlider label="force" value={push.force_n} bounds={config.bounds["push.force_n"]} step={1} unit="N" onChange={(v) => update((d) => { d.push!.force_n = v; })} />
+                  <div className="param-row">
+                    <span>direction</span>
+                    <input type="number" value={push.direction_deg} step={15} onChange={(e) => update((d) => { d.push!.direction_deg = Number(e.target.value); })} /> °
+                    <select value={DIRECTIONS.find((x) => x.deg === push.direction_deg)?.deg ?? ""} onChange={(e) => update((d) => { d.push!.direction_deg = Number(e.target.value); })}>
+                      {!DIRECTIONS.some((x) => x.deg === push.direction_deg) && <option value="">custom</option>}
+                      {DIRECTIONS.map((x) => <option key={x.deg} value={x.deg}>{x.label}</option>)}
+                    </select>
+                  </div>
+                  <NumberSlider label="start" value={push.start_s} bounds={[0, doc.horizon_s]} step={0.004} unit="s" onChange={(v) => update((d) => { d.push!.start_s = v; })} />
+                  <NumberSlider label="duration" value={push.duration_s} bounds={config.bounds["push.duration_s"]} step={0.004} unit="s" onChange={(v) => update((d) => { d.push!.duration_s = v; })} />
+                  <div className="muted small">0° pushes forward, 90° pushes toward the robot's left, 270° toward its right.</div>
+                </>
+              )}
+            </fieldset>
+
+            <fieldset>
+              <legend>Task</legend>
+              <div className="param-row">
+                <span>command vx</span>
+                <input type="number" step={0.1} value={doc.command[0]} onChange={(e) => update((d) => { d.command[0] = Number(e.target.value); })} /> m/s
+                <span>vy</span>
+                <input type="number" step={0.1} value={doc.command[1]} onChange={(e) => update((d) => { d.command[1] = Number(e.target.value); })} />
+                <span>yaw</span>
+                <input type="number" step={0.1} value={doc.command[2]} onChange={(e) => update((d) => { d.command[2] = Number(e.target.value); })} /> rad/s
+              </div>
+              <div className="param-row">
+                <span>horizon</span>
+                <input type="number" step={0.5} value={doc.horizon_s} onChange={(e) => update((d) => { d.horizon_s = Number(e.target.value); })} /> s
+                <span>name</span>
+                <input type="text" value={doc.name} maxLength={64} onChange={(e) => update((d) => { d.name = e.target.value; })} />
+              </div>
+            </fieldset>
+          </div>
+        </div>
+
+        <div>
+          <PreviewCard data={current} validating={validating} nominalMu={config.nominal_mu} />
+          <div className="card">
+            <h3>Run on the server</h3>
+            <div className="row wrap">
+              <button className="primary" onClick={() => void run("single")} disabled={!canRun}>▶ Run single paired trial</button>
+              <button className="primary" onClick={() => void run("suite")} disabled={!canRun || !valid?.runnable.suite}>▶ Run {config.suite_defaults.trials}-trial suite</button>
+              <input className="seed" style={{ width: 200 }} placeholder="suite seed (blank = new)" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running || !valid?.runnable.suite} />
+            </div>
+            <p className="muted small">
+              Single: {config.semantics.single}. Suite: {config.semantics.suite}.
+              {valid && !valid.runnable.suite && <> <strong>Suite unavailable:</strong> {valid.runnable.suite_reason}.</>}
+            </p>
+            {running && (
+              <div className="progress"><div style={{ width: `${(100 * (status?.completed ?? 0)) / (status?.total ?? 1)}%` }} /></div>
+            )}
+            {error && <p className="error">{error}</p>}
+            {status?.status === "failed" && <p className="error">Run failed: {status.error}</p>}
+          </div>
+        </div>
+      </div>
+
+      {status && status.status === "done" && status.result && (
+        <ScenarioResultCard status={status} ghost={ghost} setGhost={setGhost} onReplay={onReplay} replaying={replaying} />
+      )}
+      {status && running && <p className="muted">Executing {status.run_id}… {status.completed ?? 0}/{status.total ?? 1}</p>}
+
+      {config.runs.length > 0 && (
+        <details className="card">
+          <summary>Previous scenario runs ({config.runs.length})</summary>
+          <table>
+            <thead><tr><th>Run</th><th>Name</th><th>Mode</th><th>Origin</th><th>Result</th><th /></tr></thead>
+            <tbody>
+              {config.runs.map((r) => (
+                <tr key={r.run_id}>
+                  <td>{r.run_id}</td><td>{r.name}</td><td>{r.mode}</td><td>{r.origin}</td>
+                  <td>{r.status !== "done" ? r.status : r.mode === "single" ? `${r.outcome}${r.reason ? ` (${r.reason})` : ""}` : `${r.physical_falls}/${r.valid_trials} fell${r.numerical_failures ? ` (+${r.numerical_failures} numerical)` : ""}`}</td>
+                  <td>{r.status === "done" && <button onClick={() => poll(r.run_id)} disabled={running}>Open</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function NumberSlider({ label, value, bounds, step, unit, onChange, disabled }: {
+  label?: string; value: number; bounds: [number, number]; step: number; unit: string; onChange: (v: number) => void; disabled?: boolean;
+}) {
+  // The number box accepts any value so the server's rejection is visible; the slider spans the bounds.
+  return (
+    <div className="param-row">
+      {label && <span style={{ minWidth: 86 }}>{label}</span>}
+      <input type="range" min={bounds[0]} max={bounds[1]} step={step} value={Math.min(bounds[1], Math.max(bounds[0], value))} onChange={(e) => onChange(Number(e.target.value))} disabled={disabled} />
+      <input type="number" step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} disabled={disabled} /> {unit}
+      <span className="muted small">[{bounds[0]}, {bounds[1]}]</span>
+    </div>
+  );
+}
+
+function Errors({ errors }: { errors: FieldError[] }) {
+  return (
+    <ul className="errors">
+      {errors.map((e, i) => <li key={i}><code>{e.field}</code> {e.reason}</li>)}
+    </ul>
+  );
+}
+
+function CompileResult({ result }: { result: CompileResponse }) {
+  const usage = result.llm.usage;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="small muted">
+        {result.llm.model ?? result.llm.requested_model} via {result.llm.upstream_provider ?? "OpenRouter"} · {fmt(result.llm.latency_s, 2)} s
+        {usage?.total_tokens ? ` · ${usage.total_tokens} tokens` : ""} · prompt v{result.llm.prompt_version} · {result.compile_id}
+      </div>
+      {result.proposal.rationale && <div className="quote">Model rationale (not a measurement): {result.proposal.rationale}</div>}
+      {result.proposal.not_representable && <div className="quote">Not representable in this simulator: {result.proposal.not_representable}</div>}
+      {result.valid ? (
+        <p className="small"><span className="badge ok">valid</span> Loaded into the form below. Check the values (models can get directions and signs wrong) before running.</p>
+      ) : (
+        <>
+          <p className="small"><span className="badge warn">rejected by the validator</span> The proposal was not loaded. Proposed values:</p>
+          <code style={{ display: "block", whiteSpace: "pre-wrap" }}>{JSON.stringify(result.scenario_document, null, 1)}</code>
+          <Errors errors={result.errors} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function PreviewCard({ data, validating, nominalMu }: { data: ValidateResponse | null; validating: boolean; nominalMu: number }) {
+  if (!data) return <div className="card"><h3>Validated preview</h3><p className="muted">Validating…</p></div>;
+  if (!data.valid) {
+    return (
+      <div className="card">
+        <div className="sweep-head"><h3>Validated preview</h3><span className="badge warn">invalid{validating ? " · rechecking…" : ""}</span></div>
+        <Errors errors={data.errors} />
+        <p className="muted small">Nothing can run until every field validates. Values are never clamped for you.</p>
+      </div>
+    );
+  }
+  const p = data;
+  const f = p.friction;
+  const payload = p.mass.payload;
+  return (
+    <div className="card">
+      <div className="sweep-head">
+        <h3>Validated preview</h3>
+        <span className="badge ok">valid · {p.scenario_sha256.slice(0, 10)}{validating ? " · rechecking…" : ""}</span>
+      </div>
+      {p.adjustments.length > 0 && (
+        <ul className="adjust">
+          {p.adjustments.map((a, i) => <li key={i}><code>{a.field}</code> {JSON.stringify(a.requested)} → {JSON.stringify(a.applied)} ({a.reason})</li>)}
+        </ul>
+      )}
+      <dl className="facts">
+        <dt>Changed</dt>
+        <dd>{p.changed_from_original.length === 0 ? "nothing: trained nominal conditions" : p.changed_from_original.map((c) => c.parameter).join(", ")}</dd>
+        <dt>Friction</dt>
+        <dd>
+          requested {f.requested_mu ?? `none (trained ${nominalMu})`} · configured floor {f.configured_mu} · observed at reset: {f.observed_at_reset.contacts} floor contacts at μ{" "}
+          {f.observed_at_reset.sliding_mu_values.join(", ") || "—"}
+          <div className="muted small">Foot–floor resolution: {Object.entries(f.resolved_foot_floor).map(([foot, v]) => `${foot} ${v[0]}`).join(", ")} (floor priority {f.priorities.floor} &gt; feet {f.priorities.feet.join(",")}). Applies to {f.applies_to}.</div>
+        </dd>
+        <dt>Mass</dt>
+        <dd>
+          total {fmt(p.mass.total_mass_kg, 3)} kg
+          {payload ? (
+            <> · payload {payload.mass_kg} kg; trunk+payload {fmt(payload.composite_mass_kg, 3)} kg, CoM [{payload.composite_com_trunk_frame_m.map((x) => x.toFixed(3)).join(", ")}] m (trunk frame); inertia eigenvalues [{payload.composite_inertia_eigenvalues.map((x) => x.toFixed(4)).join(", ")}] kg·m², {payload.positive_definite ? "positive definite" : "NOT positive definite"}</>
+          ) : " · no payload body"}
+        </dd>
+        <dt>Push</dt>
+        <dd>{p.push ? `${p.push.force_n} N at ${p.push.direction_deg}° for ${p.push.duration_s} s from ${p.push.start_s} s (impulse ${fmt(p.push.impulse_ns, 2)} N·s); ${p.push.frame}` : "none"}</dd>
+        <dt>Task</dt>
+        <dd>command [{p.scenario.command.join(", ")}], horizon {p.scenario.horizon_s} s, scene {p.scenario.scene}</dd>
+        <dt>Ghost</dt>
+        <dd>{p.primary_baseline === "matched" ? "matched baseline (same friction and payload, push removed); original nominal also recorded" : "original nominal (nothing to remove, so no matched baseline)"}</dd>
+        <dt>Model</dt>
+        <dd>{p.model.reused_base_model ? "original compiled model reused (nominal physics)" : "scenario model compiled and cached"}</dd>
+      </dl>
+    </div>
+  );
+}
+
+const CASE_LABEL: Record<string, string> = { scenario: "Scenario", matched: "Matched baseline", original: "Original nominal" };
+
+function outcomeText(c: CaseSummary) {
+  if (c.outcome === "fell") return `fell (${c.reason}) at ${fmt(c.fall_time_s, 3)} s`;
+  if (c.outcome === "numerical") return `numerical failure (${c.reason})`;
+  return "survived";
+}
+
+function CaseRow({ name, c }: { name: string; c: CaseSummary }) {
+  const ph = c.physics;
+  return (
+    <tr>
+      <td><span className="dot" style={{ background: COLORS[c.outcome] }} /> {CASE_LABEL[name] ?? name}</td>
+      <td>{ph.ground_friction_mu}</td>
+      <td>{ph.payload_kg > 0 ? `${ph.payload_kg} kg @ [${ph.payload_offset_xyz_m.join(", ")}]` : "—"}</td>
+      <td>{ph.push ? `${ph.push.force_n} N ${ph.push.direction_deg}° ${ph.push.start_s}–${(ph.push.start_s + ph.push.duration_s).toFixed(3)} s` : "—"}</td>
+      <td>{outcomeText(c)}</td>
+      <td>{fmt(c.forward_progress_m, 3)}</td>
+      <td>{fmt(c.mean_forward_speed_mps, 3)}</td>
+      <td>{fmt(c.max_tilt_deg, 1)}</td>
+      <td>{fmt(c.slip.mean_slip_speed_mps, 4)}</td>
+    </tr>
+  );
+}
+
+function ScenarioResultCard({ status, ghost, setGhost, onReplay, replaying }: {
+  status: ScenarioStatus; ghost: "matched" | "original"; setGhost: (g: "matched" | "original") => void;
+  onReplay: Props["onReplay"]; replaying: string | null;
+}) {
+  const r = status.result!;
+  const origin = status.request.origin;
+  const head = (
+    <div className="sweep-head">
+      <strong>Executed now · scenario run {status.run_id} · {r.scenario.name}</strong>
+      <span className="badge live">new simulation · commit {r.provenance.git.commit.slice(0, 7)}{r.provenance.git.dirty ? " (dirty tree)" : ""} · {fmt(r.wall_s, 2)} s</span>
+    </div>
+  );
+  const originLine = (
+    <p className="muted small">
+      Origin: {origin.kind === "openrouter" ? `OpenRouter compile ${origin.compile_id} (${origin.model})${origin.edited_after_compile ? ", edited after compile" : ", unedited"}` : "manual / preset"}.
+      Reproduce: <code>{status.request.reproduce}</code>
+    </p>
+  );
+  if (r.mode === "single" && r.cases) {
+    const names = (["scenario", "matched", "original"] as const).filter((n) => r.cases![n]);
+    return (
+      <div className="card">
+        {head}
+        <table className="cases">
+          <thead><tr><th>Case</th><th>μ</th><th>Payload</th><th>Push</th><th>Outcome</th><th>Progress m</th><th>Speed m/s</th><th>Max tilt °</th><th>Slip m/s</th></tr></thead>
+          <tbody>{names.map((n) => <CaseRow key={n} name={n} c={r.cases![n]!} />)}</tbody>
+        </table>
+        <p className="small">{r.trial_semantics}. Slip = mean horizontal foot speed while that foot is in floor contact, before any fall.</p>
+        <div className="row wrap">
+          {r.cases.matched && (
+            <button onClick={() => onReplay(status.run_id, 0, "matched", `Scenario ${r.scenario.name} vs matched baseline`)} disabled={replaying !== null}>
+              {replaying === `scenario/${status.run_id}/0/matched` ? "Loading…" : "Replay vs matched baseline"}
+            </button>
+          )}
+          <button onClick={() => onReplay(status.run_id, 0, "original", `Scenario ${r.scenario.name} vs original nominal`)} disabled={replaying !== null}>
+            {replaying === `scenario/${status.run_id}/0/original` ? "Loading…" : "Replay vs original nominal"}
+          </button>
+        </div>
+        {originLine}
+      </div>
+    );
+  }
+  const summary = status.summary;
+  const att = r.aggregates?.attacked;
+  const nom = r.aggregates?.nominal;
+  return (
+    <div className="card">
+      {head}
+      <p className="small">{r.trial_semantics}</p>
+      <div className="chips">
+        {summary?.trials.map((t) => (
+          <button key={t.trial} className="chip" style={{ background: COLORS[t.outcome] }} disabled={replaying !== null}
+            title={`trial ${t.trial}: ${t.outcome}${t.fall_time_s !== null ? ` @ ${fmt(t.fall_time_s)} s` : ""}`}
+            onClick={() => onReplay(status.run_id, t.trial, ghost, `Scenario ${r.scenario.name} · trial ${t.trial} · push at ${t.start_s.toFixed(3)} s`)}>
+            <span>{t.start_s.toFixed(3)} s</span>
+            <small>{replaying === `scenario/${status.run_id}/${t.trial}/${ghost}` ? "loading" : t.outcome === "fell" ? `fell ${fmt(t.fall_time_s, 2)}` : t.outcome}</small>
+          </button>
+        ))}
+      </div>
+      {att && nom && (
+        <p className="result-line">
+          <strong>Pushed: {att.physical_falls} falls / {att.valid_trials} valid trials</strong> ({pct(att.fall_rate)})
+          {att.wilson_95 && <> · Wilson 95% [{fmt(att.wilson_95[0])}, {fmt(att.wilson_95[1])}]</>}; numerical {att.numerical_failures}.
+          {" "}Matched baseline (same friction and payload, no push): {nom.physical_falls} falls, {nom.distinct_trajectories} distinct trajectory.
+          {r.original && <> Original nominal reference: {outcomeText(r.original)}, progress {fmt(r.original.forward_progress_m, 2)} m.</>}
+        </p>
+      )}
+      <div className="row">
+        <span className="small">Ghost in replays:</span>
+        <label className="radio small"><input type="radio" checked={ghost === "matched"} onChange={() => setGhost("matched")} /> matched baseline</label>
+        <label className="radio small"><input type="radio" checked={ghost === "original"} onChange={() => setGhost("original")} /> original nominal</label>
+      </div>
+      <p className="muted small">An estimate over the stated push-timing distribution only; click a trial to replay it.</p>
+      {originLine}
+    </div>
+  );
+}

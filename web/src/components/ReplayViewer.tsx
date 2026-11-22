@@ -17,6 +17,7 @@ interface Robot {
   pos: Float32Array;
   quat: Float32Array;
   frames: number;
+  payload: { mesh: THREE.Mesh; pos: Float32Array; quat: Float32Array } | null;
 }
 
 const EVENT_LABEL: Record<string, string> = {
@@ -81,21 +82,43 @@ export function ReplayViewer({ model, replay, title }: Props) {
     grid.rotation.x = Math.PI / 2;
     grid.position.x = 15;
     scene.add(grid);
+    // Floor cue: tinted only when the simulated floor friction differs from the trained 0.6.
+    const env = replay.environment;
+    let floor: THREE.Mesh | null = null;
+    if (env && Math.abs(env.mu - env.nominal_mu) > 1e-9) {
+      const color = env.mu < env.nominal_mu ? "#a9d8f0" : "#e2c9a0";
+      floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color, roughness: env.mu < env.nominal_mu ? 0.15 : 0.95 }));
+      floor.position.set(15, 0, -0.002);
+      scene.add(floor);
+    }
 
-    const makeRobot = (key: "nominal" | "attacked", material: THREE.Material): Robot => {
+    const boxGeometries: THREE.BufferGeometry[] = [];
+    const makeRobot = (key: "nominal" | "attacked", material: THREE.Material, boxMaterial: THREE.Material): Robot => {
       const group = new THREE.Group();
       const meshes = model.geoms.map((g) => {
         const mesh = new THREE.Mesh(geometries[g.mesh], material);
         group.add(mesh);
         return mesh;
       });
-      scene.add(group);
       const c = replay.cases[key];
-      return { group, meshes, pos: decodeFloat32(c.pos), quat: decodeFloat32(c.quat), frames: c.frames };
+      let payload: Robot["payload"] = null;
+      if (c.payload_box) {
+        // Pose from server kinematics of the welded payload geom; the browser only draws it.
+        const [hx, hy, hz] = c.payload_box.half_size_m;
+        const geometry = new THREE.BoxGeometry(2 * hx, 2 * hy, 2 * hz);
+        boxGeometries.push(geometry);
+        const mesh = new THREE.Mesh(geometry, boxMaterial);
+        group.add(mesh);
+        payload = { mesh, pos: decodeFloat32(c.payload_box.pos), quat: decodeFloat32(c.payload_box.quat) };
+      }
+      scene.add(group);
+      return { group, meshes, pos: decodeFloat32(c.pos), quat: decodeFloat32(c.quat), frames: c.frames, payload };
     };
     const nominalMaterial = new THREE.MeshStandardMaterial({ color: "#5b8bd6", transparent: true, opacity: 0.35, depthWrite: false });
     const attackedMaterial = new THREE.MeshStandardMaterial({ color: "#3a3f47", metalness: 0.1, roughness: 0.6 });
-    const robots = [makeRobot("nominal", nominalMaterial), makeRobot("attacked", attackedMaterial)];
+    const ghostBoxMaterial = new THREE.MeshStandardMaterial({ color: "#e08a1e", transparent: true, opacity: 0.35, depthWrite: false });
+    const boxMaterial = new THREE.MeshStandardMaterial({ color: "#e08a1e", roughness: 0.5 });
+    const robots = [makeRobot("nominal", nominalMaterial, ghostBoxMaterial), makeRobot("attacked", attackedMaterial, boxMaterial)];
 
     const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), 0.5, 0xe07a10, 0.18, 0.12);
     arrow.visible = false;
@@ -114,6 +137,11 @@ export function ReplayViewer({ model, replay, title }: Props) {
         mesh.position.set(robot.pos[p], robot.pos[p + 1], robot.pos[p + 2]);
         mesh.quaternion.set(robot.quat[q + 1], robot.quat[q + 2], robot.quat[q + 3], robot.quat[q]);
       });
+      if (robot.payload) {
+        const { mesh, pos, quat } = robot.payload;
+        mesh.position.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+        mesh.quaternion.set(quat[i * 4 + 1], quat[i * 4 + 2], quat[i * 4 + 3], quat[i * 4]);
+      }
     };
     const trunk = (robot: Robot, f: number) => {
       const i = Math.min(f, robot.frames - 1) * G * 3; // geom 0 is the trunk
@@ -172,6 +200,13 @@ export function ReplayViewer({ model, replay, title }: Props) {
       renderer.dispose();
       nominalMaterial.dispose();
       attackedMaterial.dispose();
+      ghostBoxMaterial.dispose();
+      boxMaterial.dispose();
+      boxGeometries.forEach((g) => g.dispose());
+      if (floor) {
+        floor.geometry.dispose();
+        (floor.material as THREE.Material).dispose();
+      }
       mount.removeChild(renderer.domElement);
     };
   }, [model, replay, geometries, duration]);
@@ -202,6 +237,10 @@ export function ReplayViewer({ model, replay, title }: Props) {
   const tilt = (Math.acos(Math.max(-1, Math.min(1, att.up_z[f] ?? 1))) * 180) / Math.PI;
   const events = Object.entries(att.outcome.events).sort((a, b) => a[1] - b[1]);
   const pctOf = (time: number) => `${(100 * time) / duration}%`;
+  const attackedLabel = replay.labels?.attacked ?? "Shoved";
+  const nominalLabel = replay.labels?.nominal ?? "Nominal";
+  const env = replay.environment;
+  const payloadKg = att.payload_box?.mass_kg ?? 0;
 
   return (
     <div className="replay">
@@ -209,9 +248,23 @@ export function ReplayViewer({ model, replay, title }: Props) {
         <div>
           <strong>{title}</strong>
           <div className="muted small">
-            Shoved robot opaque, nominal robot translucent blue; one shared clock. Poses are recorded MuJoCo
-            states, not browser physics.
+            {replay.labels
+              ? `${attackedLabel} robot opaque; ghost (translucent blue) = ${nominalLabel}. One shared clock. `
+              : "Shoved robot opaque, nominal robot translucent blue; one shared clock. "}
+            Poses are recorded MuJoCo states, not browser physics.
           </div>
+          {(env || payloadKg > 0) && (
+            <div className="small scene-cues">
+              {env && (
+                <span>
+                  Floor μ {env.mu.toFixed(2)} (trained {env.nominal_mu.toFixed(1)})
+                  {Math.abs(env.mu - env.nominal_mu) > 1e-9 ? (env.mu < env.nominal_mu ? " · tinted blue: more slippery" : " · tinted tan: grippier") : " · untinted"}
+                  {Math.abs(env.ghost_mu - env.mu) > 1e-9 && ` · the ghost was simulated at μ ${env.ghost_mu.toFixed(2)}, the floor shows the scenario`}
+                </span>
+              )}
+              {payloadKg > 0 && <span> · orange box = {payloadKg} kg payload welded to the trunk (collision-free)</span>}
+            </div>
+          )}
         </div>
         <SourceBadge replay={replay} />
       </div>
@@ -242,15 +295,15 @@ export function ReplayViewer({ model, replay, title }: Props) {
       </div>
       <div className="readout">
         <span>t = {fmt(t, 2)} s</span>
-        <span>shoved tilt {fmt(tilt, 1)}°</span>
+        <span>{replay.labels ? "scenario" : "shoved"} tilt {fmt(tilt, 1)}°</span>
         <span>trunk z {fmt(att.trunk_z[f], 3)} m</span>
         <span>feet {replay.foot_order.map((foot, i) => (att.feet[f]?.[i] ? foot : "··")).join(" ")}</span>
         <span className={att.nonfoot[f] ? "bad" : ""}>non-foot contact {att.nonfoot[f] ? "YES" : "no"}</span>
-        {f >= att.frames - 1 && frame > f && <span className="muted">shoved episode ended at {fmt((att.frames - 1) / replay.fps, 2)} s</span>}
+        {f >= att.frames - 1 && frame > f && <span className="muted">{replay.labels ? "scenario" : "shoved"} episode ended at {fmt((att.frames - 1) / replay.fps, 2)} s</span>}
       </div>
       <div className="events">
-        <EpisodeLine label="Shoved" c={att.outcome} />
-        <EpisodeLine label="Nominal" c={nom.outcome} />
+        <EpisodeLine label={attackedLabel} c={att.outcome} horizon={duration} />
+        <EpisodeLine label={replay.labels ? "Ghost" : nominalLabel} c={nom.outcome} horizon={duration} />
         {replay.push && (
           <div className="muted small">
             Shove: {replay.push.force_n} N, world force [{replay.push.world_force_n.map((v) => v.toFixed(0)).join(", ")}] N, {fmt(replay.push.start_s)}–{fmt(replay.push.end_s)} s.
@@ -263,10 +316,10 @@ export function ReplayViewer({ model, replay, title }: Props) {
   );
 }
 
-function EpisodeLine({ label, c }: { label: string; c: Replay["cases"]["attacked"]["outcome"] }) {
+function EpisodeLine({ label, c, horizon }: { label: string; c: Replay["cases"]["attacked"]["outcome"]; horizon: number }) {
   const text =
     c.outcome === "survived"
-      ? "survived the 5 s horizon"
+      ? `survived the ${fmt(horizon, 2)} s horizon`
       : c.outcome === "fell"
         ? `FELL: ${c.reason} at ${fmt(c.fall_time_s)} s${c.time_after_start_s !== null ? ` (${fmt(c.time_after_start_s)} s after shove start)` : ""}`
         : `NUMERICAL FAILURE (${c.reason}) at ${fmt(c.numerical_time_s)} s — not a fall`;
@@ -279,6 +332,14 @@ function EpisodeLine({ label, c }: { label: string; c: Replay["cases"]["attacked
 
 function SourceBadge({ replay }: { replay: Replay }) {
   if (replay.source === "recorded") {
+    if (replay.mode) {
+      return (
+        <span className="badge live">
+          Recorded trajectory · scenario run {replay.run_id}
+          {replay.mode === "suite" ? ` trial ${replay.trial}` : ""}
+        </span>
+      );
+    }
     return <span className="badge live">Recorded trajectory · live run {replay.run_id} trial {replay.trial}</span>;
   }
   const v = replay.verification;

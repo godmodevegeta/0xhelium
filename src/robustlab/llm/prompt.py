@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
 MAX_PROMPT_CHARS = 1000
 
 SYSTEM_PROMPT = """You translate a plain-English description of a disturbance for a walking \
@@ -19,6 +19,8 @@ keep 0.6. Ice ~0.05-0.1, wet tile ~0.2-0.3, dry concrete ~0.6-0.8, rubber ~1.0+.
 direction_deg in the robot's starting heading frame: 0 = forward, 90 = toward the robot's left, \
 180 = backward, 270 = toward the robot's right (a shove FROM the left points to 270); start_s \
 between 2.0 and 4.5; duration_s 0.04-0.5.
+- Direction words: the force points AWAY from where the pusher stands. Shove/kick from the left -> 270; from the right -> 90; from behind -> 0 (pushes it forward); from the front -> 180.
+- Position words for the payload offset: front/forward -> x > 0, back/rear -> x < 0, left -> y > 0, right -> y < 0, high/on top -> z > 0. Example: "back left" -> x < 0 and y > 0.
 - command: [vx, vy, yaw_rate], usually [1.0, 0.0, 0.0]; vx in [-1.5, 1.5] m/s, vy in [-0.8, 0.8] \
 m/s, yaw_rate in [-1.2, 1.2] rad/s.
 

@@ -188,7 +188,7 @@ def run_single(scenario: Scenario, base_stack, out_dir: Path | None, *,
     base_runner = EpisodeRunner(base_stack.model, base_stack.ids, base_stack.policy,
                                 base_stack.actor, criteria)  # fmt: skip
     records = {}
-    paired = None
+    paired = push_record = None
     if scenario.push is not None:
         config = suite_config_for(scenario, base_stack.policy_path.as_posix(), trials=1,
                                   interval_s=(scenario.push.start_s,
@@ -200,6 +200,7 @@ def run_single(scenario: Scenario, base_stack, out_dir: Path | None, *,
         records["scenario"] = (attacked, a_out, scenario.push.start_s)
         records["matched"] = (matched, m_out, None)
         paired = trial["paired"]
+        push_record = trial["push"]
         stance = trial["stance_at_start"]
     else:
         rec = runner.run(EpisodeConfig(scenario.command, scenario.horizon_s, 0))
@@ -241,6 +242,7 @@ def run_single(scenario: Scenario, base_stack, out_dir: Path | None, *,
             "original": "trained nominal: friction 0.6, no payload, no push; same command and horizon",
         },
         "paired": paired,
+        "push": push_record,
         "stance_at_push": stance,
         "trial_semantics": "one deterministic paired run; repeating it reproduces it exactly",
     }

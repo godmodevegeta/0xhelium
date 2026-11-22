@@ -148,21 +148,236 @@ export interface Verification {
   cases: Record<string, { digest_match: boolean; outcome_match: boolean; recorded_outcome: string; resimulated_outcome: string }>;
 }
 
+export interface PayloadBoxFrames {
+  half_size_m: [number, number, number];
+  mass_kg: number;
+  pos: string;
+  quat: string;
+}
+
+export interface GhostInfo {
+  kind: "matched" | "original";
+  label: string;
+  parameters: { ground_friction_mu: number; payload_kg: number; payload_offset_xyz_m: number[]; push: null };
+}
+
 export interface Replay {
   fps: number;
   frames: number;
   time: number[];
   geom_count: number;
   foot_order: string[];
-  cases: { nominal: ReplayCase; attacked: ReplayCase };
+  cases: { nominal: ReplayCase & { payload_box?: PayloadBoxFrames | null }; attacked: ReplayCase & { payload_box?: PayloadBoxFrames | null } };
   push: { start_s: number; end_s: number; world_force_n: [number, number, number]; force_n: number } | null;
   source: "re-simulated" | "recorded";
   verification: Verification | null;
-  start_s: number;
+  start_s: number | null;
   run_id?: string;
   trial?: number;
   start_substep?: number;
   which?: "final" | "search";
+  // M5 scenario replays
+  mode?: "single" | "suite";
+  ghost?: GhostInfo;
+  labels?: { attacked: string; nominal: string };
+  environment?: { mu: number; ghost_mu: number; nominal_mu: number };
+}
+
+// ---------------------------------------------------------------- M5 scenario designer
+
+export interface ScenarioPush {
+  force_n: number;
+  direction_deg: number;
+  start_s: number;
+  duration_s: number;
+}
+
+export interface ScenarioDoc {
+  schema_version: number;
+  kind: string;
+  name: string;
+  command: [number, number, number];
+  horizon_s: number;
+  scene: string;
+  environment: { ground_friction_mu: number | null };
+  payload: { mass_kg: number; offset_xyz_m: [number, number, number] };
+  push: ScenarioPush | null;
+}
+
+export interface FieldError {
+  field: string;
+  reason: string;
+}
+
+export interface Adjustment {
+  field: string;
+  requested: unknown;
+  applied: unknown;
+  reason: string;
+}
+
+export interface FrictionReport {
+  requested_mu: number | null;
+  nominal_mu: number;
+  configured_mu: number;
+  configured_floor_friction: number[];
+  resolved_foot_floor: Record<string, number[]>;
+  observed_at_reset: { label: string; contacts: number; sliding_mu_values: number[]; dims: number[] };
+  priorities: { floor: number; feet: number[] };
+  condim: { floor: number; feet: number[] };
+  rule: string;
+  applies_to: string;
+}
+
+export interface MassReport {
+  total_mass_kg: number;
+  payload: null | {
+    mass_kg: number;
+    trunk_mass_kg: number;
+    composite_mass_kg: number;
+    composite_com_trunk_frame_m: number[];
+    composite_inertia_eigenvalues: number[];
+    positive_definite: boolean;
+  };
+}
+
+export interface Changed {
+  parameter: string;
+  nominal: unknown;
+  value: unknown;
+}
+
+export interface ScenarioPreview {
+  valid: true;
+  errors: FieldError[];
+  scenario: ScenarioDoc;
+  adjustments: Adjustment[];
+  scenario_sha256: string;
+  changed_from_original: Changed[];
+  effective_mu: number;
+  friction: FrictionReport;
+  mass: MassReport;
+  model: { reused_base_model: boolean; cache: { size: number; builds: number; hits: number } };
+  push: (ScenarioPush & { direction_vector: number[]; impulse_ns: number; frame: string }) | null;
+  runnable: { single: boolean; suite: boolean; suite_reason: string | null };
+  primary_baseline: "matched" | "original";
+}
+
+export type ValidateResponse = ScenarioPreview | { valid: false; errors: FieldError[] };
+
+export interface LlmMeta {
+  requested_model: string;
+  model: string | null;
+  upstream_provider: string | null;
+  usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+  latency_s: number;
+  prompt_version: number;
+}
+
+export interface CompileResponse {
+  compile_id: string;
+  valid: boolean;
+  errors: FieldError[];
+  proposal: { name?: string; rationale?: string; not_representable?: string } & Record<string, unknown>;
+  scenario_document: ScenarioDoc;
+  unexpected_fields: string[];
+  llm: LlmMeta;
+  scenario?: ScenarioDoc;
+  adjustments?: Adjustment[];
+  preview?: ScenarioPreview;
+}
+
+export interface CompilerStatus {
+  configured: boolean;
+  provider: string;
+  model: string;
+  model_source: string;
+  limits: { max_prompt_chars: number; timeout_s: number; max_tokens: number; rate: { per_client_per_min: number; total_per_min: number } | null };
+  prompt_version: number;
+}
+
+export interface ScenarioRunEntry {
+  run_id: string;
+  mode: "single" | "suite";
+  name: string;
+  origin: string;
+  requested_utc: string;
+  status: string;
+  outcome?: Outcome;
+  reason?: string | null;
+  physical_falls?: number;
+  valid_trials?: number;
+  numerical_failures?: number;
+}
+
+export interface ScenarioConfig {
+  bounds: Record<string, [number, number]>;
+  nominal_mu: number;
+  presets: { id: string; file: string; note: string; scenario: ScenarioDoc; sha256: string }[];
+  examples: string[];
+  compiler: CompilerStatus;
+  suite_defaults: { trials: number; interval_s: [number, number]; method: string; max_trials: number };
+  semantics: Record<string, string>;
+  runs: ScenarioRunEntry[];
+}
+
+export interface CaseSummary {
+  outcome: Outcome;
+  reason: string | null;
+  fall_time_s: number | null;
+  numerical_time_s: number | null;
+  time_after_start_s: number | null;
+  forward_progress_m: number;
+  max_tilt_deg: number;
+  mean_forward_speed_mps: number;
+  slip: { mean_slip_speed_mps: number | null; total_slip_distance_m: number };
+  physics: { ground_friction_mu: number; friction_source: string; payload_kg: number; payload_offset_xyz_m: number[]; push: ScenarioPush | null };
+}
+
+export interface ScenarioResult {
+  mode: "single" | "suite";
+  scenario: ScenarioDoc;
+  adjustments: Adjustment[];
+  changed_from_original: Changed[];
+  trial_semantics: string;
+  primary_baseline: "matched" | "original";
+  baselines: Record<string, string | null>;
+  cases?: { scenario: CaseSummary; matched?: CaseSummary; original: CaseSummary };
+  stance_at_push?: Record<string, boolean> | null;
+  results_sha256?: string;
+  experiment_results_sha256?: string;
+  aggregates?: ReportSummary["aggregates"];
+  original?: CaseSummary;
+  matched_physics?: CaseSummary["physics"];
+  model: { reused_base_model: boolean; friction: FrictionReport; mass: MassReport };
+  provenance: { git: { commit: string; dirty: boolean | null } };
+  wall_s: number;
+}
+
+export interface ScenarioStatus {
+  run_id: string;
+  status: "queued" | "running" | "done" | "failed" | "incomplete";
+  request: {
+    mode: "single" | "suite";
+    origin: { kind: string; compile_id?: string; model?: string; edited_after_compile?: boolean };
+    reproduce: string;
+    suite: { trials: number; seed: number; seed_source: string; interval_s: [number, number] } | null;
+    scenario: ScenarioDoc;
+  };
+  completed?: number;
+  total?: number;
+  trials?: { trial: number; start_s: number; attacked: { outcome: Outcome; reason: string | null; fall_time_s: number | null } }[];
+  error?: string | null;
+  result?: ScenarioResult;
+  summary?: ReportSummary;
+}
+
+export interface ScenarioRunRequest {
+  scenario: ScenarioDoc;
+  mode: "single" | "suite";
+  trials?: number;
+  seed?: number;
+  compile_id?: string;
 }
 
 // ---------------------------------------------------------------- M4 failure discovery
@@ -286,22 +501,40 @@ export interface DiscoveryInfo {
   runs: { run_id: string; algorithm: string; budget: number; seed: number; status: string; found_failure?: boolean; final_impulse_ns?: number | null; final_source?: string | null; stop_reason?: string }[];
 }
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly detail: unknown,
+  ) {
+    super(message);
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
-    let detail = response.statusText;
+    let text = response.statusText;
+    let detail: unknown = null;
     try {
       const body = await response.json();
-      detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      detail = body.detail;
+      if (typeof detail === "string") text = detail;
+      else if (detail && typeof detail === "object" && "message" in detail) text = String((detail as { message: unknown }).message);
+      else text = JSON.stringify(detail);
     } catch {
       /* keep statusText */
     }
-    throw new ApiError(`${response.status}: ${detail}`);
+    throw new ApiError(`${response.status}: ${text}`, response.status, detail);
   }
   return (await response.json()) as T;
 }
+
+const postJson = (body: unknown): RequestInit => ({
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
 
 export const api = {
   model: () => request<ModelPayload>("/api/model"),
@@ -329,6 +562,13 @@ export const api = {
     request<{ cancel_requested: boolean }>(`/api/discovery/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }),
   discoveryReplay: (runId: string, which: "final" | "search") =>
     request<Replay>(`/api/discovery/runs/${encodeURIComponent(runId)}/replay?which=${which}`),
+  scenarioConfig: () => request<ScenarioConfig>("/api/scenarios/config"),
+  validateScenario: (scenario: ScenarioDoc) => request<ValidateResponse>("/api/scenarios/validate", postJson({ scenario })),
+  compileScenario: (prompt: string) => request<CompileResponse>("/api/scenarios/compile", postJson({ prompt })),
+  startScenario: (body: ScenarioRunRequest) => request<{ run_id: string; request: ScenarioStatus["request"] }>("/api/scenarios/runs", postJson(body)),
+  scenarioStatus: (runId: string) => request<ScenarioStatus>(`/api/scenarios/runs/${encodeURIComponent(runId)}`),
+  scenarioReplay: (runId: string, trial: number, ghost: "primary" | "matched" | "original") =>
+    request<Replay>(`/api/scenarios/runs/${encodeURIComponent(runId)}/replay?trial=${trial}&ghost=${ghost}`),
 };
 
 export function decodeFloat32(b64: string): Float32Array {

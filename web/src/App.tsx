@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type DiscoveryInfo, type HiddenPhase as HiddenPhaseData, type LiveStress as LiveStressData, type ModelPayload, type Replay } from "./api";
+import { api, type DiscoveryInfo, type HiddenPhase as HiddenPhaseData, type LiveStress as LiveStressData, type ModelPayload, type Replay, type ScenarioConfig } from "./api";
 import { Discovery } from "./components/Discovery";
 import { HiddenPhase } from "./components/HiddenPhase";
 import { LiveStress } from "./components/LiveStress";
 import { ReplayViewer } from "./components/ReplayViewer";
+import { ScenarioDesigner } from "./components/ScenarioDesigner";
 
-type Tab = "hidden" | "live" | "discovery";
+type Tab = "hidden" | "live" | "discovery" | "designer";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("hidden");
@@ -13,6 +14,7 @@ export function App() {
   const [hidden, setHidden] = useState<HiddenPhaseData | null>(null);
   const [live, setLive] = useState<LiveStressData | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryInfo | null>(null);
+  const [designer, setDesigner] = useState<ScenarioConfig | null>(null);
   const [replay, setReplay] = useState<{ data: Replay; title: string } | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,18 +26,26 @@ export function App() {
   const refreshDiscovery = useCallback(() => {
     api.discoveryInfo().then(setDiscovery).catch((e) => setError(String(e)));
   }, []);
+  const refreshDesigner = useCallback(() => {
+    api.scenarioConfig().then(setDesigner).catch((e) => setError(String(e)));
+  }, []);
 
   useEffect(() => {
     api.hiddenPhase().then(setHidden).catch((e) => setError(String(e)));
     refreshLive();
     refreshDiscovery();
+    refreshDesigner();
     api.model().then(setModel).catch((e) => setError(String(e)));
     // Deep links: ?tab=live, ?replay=<start substep> (Preset 1), ?frame=<n> (initial frame).
     const params = new URLSearchParams(window.location.search);
     if (params.get("tab") === "live") setTab("live");
     if (params.get("tab") === "discovery") setTab("discovery");
+    if (params.get("tab") === "designer") setTab("designer");
     const substep = params.get("replay");
     if (substep !== null && /^\d+$/.test(substep)) void replayHidden(Number(substep));
+    // ?tab=designer&scenario_replay=<run id>:<trial>:<primary|matched|original>
+    const sr = params.get("scenario_replay")?.match(/^(sc-\d{8}T\d{6}Z-[0-9a-f]{8}):(\d{1,2}):(primary|matched|original)$/);
+    if (sr) void replayScenario(sr[1], Number(sr[2]), sr[3] as "primary" | "matched" | "original", `Scenario run ${sr[1]} · trial ${sr[2]} · ghost ${sr[3]}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshLive]);
 
@@ -59,6 +69,8 @@ export function App() {
     show(`${runId}/${trial}`, `Preset 2 · run ${runId} · trial ${trial}`, () => api.runReplay(runId, trial));
   const replayDiscovery = (runId: string, which: "final" | "search") =>
     show(`discovery/${runId}/${which}`, `Failure Discovery · ${runId} · ${which === "final" ? "discovered failure" : "confirmed search failure"}`, () => api.discoveryReplay(runId, which));
+  const replayScenario = (runId: string, trial: number, ghost: "primary" | "matched" | "original", title: string) =>
+    show(`scenario/${runId}/${trial}/${ghost}`, title, () => api.scenarioReplay(runId, trial, ghost));
   const hiddenLoading = loadingKey?.startsWith("hidden/") ? Number(loadingKey.split("/")[1]) : null;
 
   return (
@@ -72,19 +84,21 @@ export function App() {
           <button className={tab === "hidden" ? "tab active" : "tab"} onClick={() => setTab("hidden")}>Hidden Phase Vulnerability</button>
           <button className={tab === "live" ? "tab active" : "tab"} onClick={() => setTab("live")}>Live Stress Test</button>
           <button className={tab === "discovery" ? "tab active" : "tab"} onClick={() => setTab("discovery")}>Failure Discovery</button>
+          <button className={tab === "designer" ? "tab active" : "tab"} onClick={() => setTab("designer")}>Scenario Designer</button>
         </nav>
       </header>
       {error && <div className="error banner">{error}</div>}
       {tab === "hidden" && (hidden ? <HiddenPhase data={hidden} onReplay={replayHidden} replaying={hiddenLoading} /> : <p className="muted">Loading preset…</p>)}
       {tab === "live" && (live ? <LiveStress data={live} onReplay={replayLive} onRefresh={refreshLive} replaying={loadingKey} /> : <p className="muted">Loading preset…</p>)}
       {tab === "discovery" && (discovery ? <Discovery info={discovery} onReplay={replayDiscovery} onRefresh={refreshDiscovery} replaying={loadingKey} /> : <p className="muted">Loading…</p>)}
+      {tab === "designer" && (designer ? <ScenarioDesigner config={designer} onReplay={replayScenario} onRefresh={refreshDesigner} replaying={loadingKey} /> : <p className="muted">Loading…</p>)}
       <div ref={replayRef}>
         {replay && model && <ReplayViewer model={model} replay={replay.data} title={replay.title} />}
         {replay && !model && <p className="muted">Loading robot meshes…</p>}
       </div>
       <footer className="muted small">
-        Simulation results only: one simulator, an idealized trunk force, flat ground. No claim about the real robot or about
-        disturbances other than the ones listed.
+        Simulation results only: one simulator, an idealized trunk force, flat ground with a uniform friction coefficient, a
+        rigid welded payload box. No claim about the real robot or about conditions other than the ones listed.
       </footer>
     </div>
   );
