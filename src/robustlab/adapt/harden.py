@@ -171,6 +171,7 @@ def run_hardening(
     *,
     cancelled: Callable[[], bool] | None = None,
     on_progress: Callable[[dict], None] | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> dict:
     """Run the bounded search and return the candidate record (not yet written)."""
     with warnings.catch_warnings():
@@ -180,8 +181,11 @@ def run_hardening(
     started = time.perf_counter()
     train = training_episodes(sets, config.focus)
     val = sets.split("validation_preview")
+    stage = on_stage or (lambda _name: None)
+    stage("starting workers")
     evaluator = Evaluator(Context(stack, calibration), config.workers)
     try:
+        stage("baseline")
         refs = reference_specs((*train, *val))
         ref_metrics = evaluator.map([(None, s) for s in refs.values()])
         ref_progress = {k: m["progress_m"] for k, m in zip(refs, ref_metrics, strict=True)}
@@ -198,6 +202,7 @@ def run_hardening(
             "verbose": -9, "tolfun": 0, "tolx": 0, "tolfunhist": 0, "tolstagnation": 10**9,
         }  # fmt: skip
         es = cma.CMAEvolutionStrategy([0.0] * N_PARAMS, config.sigma0, options)
+        stage("search")
         per_generation = config.popsize * len(train)
         opt_rollouts = 0
         history = []
@@ -251,6 +256,7 @@ def run_hardening(
         opt_wall = time.perf_counter() - opt_started
 
         improved = best is not None and best["objective"] < j_base
+        stage("validation preview")
         cand_val = (evaluator.map([(tuple(best["params"]), s) for s in val])
                     if best is not None else None)  # fmt: skip
         validation_rollouts = len(val) if best is not None else 0
