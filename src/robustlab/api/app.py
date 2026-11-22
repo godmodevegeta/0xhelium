@@ -16,7 +16,7 @@ from typing import Literal
 
 import mujoco
 import numpy as np
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -508,10 +508,14 @@ def create_app(settings: ServerSettings | None = None, compiler=None) -> FastAPI
     # ------------------------------------------------------------------ policy hardening (M6)
 
     from robustlab.adapt.harden import HardenConfigError, default_workers
+    from robustlab.api.gate import GateService
     from robustlab.api.hardening import PRESET_KEY, HardeningService
 
+    gate = GateService(settings.root)
+    app.state.gate = gate
     hardening = HardeningService(settings, jobs, settings.hardening_wall_clock_s,
-                                 settings.hardening_workers or default_workers())  # fmt: skip
+                                 settings.hardening_workers or default_workers(),
+                                 gate_status=gate.status_for)  # fmt: skip
     app.state.hardening = hardening
 
     @app.get("/api/hardening")
@@ -567,6 +571,24 @@ def create_app(settings: ServerSettings | None = None, compiler=None) -> FastAPI
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc
         return await wait(jobs.replay(("hardening", run_id, episode, ghost), compute))
+
+    # ------------------------------------------------------------------ regression gate (M7)
+
+    @app.get("/api/gate")
+    async def gate_info():
+        return gate.view
+
+    @app.get("/api/gate/replay")
+    async def gate_replay(
+        candidate: str = Query(pattern=r"^cand-[0-9a-f]{12}$"),
+        episode: str = Query(pattern=r"^[A-Za-z0-9._-]{1,64}$"),
+        ghost: Literal["baseline", "matched"] = "baseline",
+    ):
+        try:
+            compute = gate.replay_compute(candidate, episode, ghost)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return await wait(jobs.replay(("gate", candidate, episode, ghost), compute))
 
     if settings.web_dist.is_dir():
         app.mount("/", StaticFiles(directory=settings.web_dist, html=True), name="web")

@@ -427,7 +427,7 @@ async def run(base: str, nokey: str | None, out: Path) -> dict:
             )
             await asyncio.sleep(1.0)
             sem = await page.eval(
-                "({labels: [...document.querySelectorAll('.robot-label')].map(e => e.textContent), head: document.querySelector('.stage-title .xsmall').textContent, badge: document.querySelector('.stage-head .badge')?.textContent, falls: [...document.querySelectorAll('.track-fall')].map(e => e.className), push: !!document.querySelector('.track-push'), reflex: document.querySelectorAll('.track-reflex').length, page_text_promoted: /promoted (policy|controller)|is now live|improved policy/i.test(document.querySelector('.hero').textContent.replace('never a promoted policy', ''))})"
+                "({labels: [...document.querySelectorAll('.robot-label')].map(e => e.textContent), head: document.querySelector('.stage-title .xsmall').textContent, badge: document.querySelector('.stage-head .badge')?.textContent, falls: [...document.querySelectorAll('.track-fall')].map(e => e.className), push: !!document.querySelector('.track-push'), reflex: document.querySelectorAll('.track-reflex').length, page_text_promoted: /promoted|is now live|improved policy/i.test(document.querySelector('.hero').innerText.replace(/Promoted by gate-v\\d+ as v\\d+-cand-[0-9a-f]{12}/g, '').replace(/Promoted v\\d+ · policy \\+ reflex/g, '').replace('it is never promoted from this page', '')), status_pill: document.querySelector('.status-pill')?.textContent})"
             )
             results["flows"]["harden_replay"] = {"title": title, **sem}
             await page.shot(out / "flow-harden-replay-1440x900.png")
@@ -471,6 +471,32 @@ async def run(base: str, nokey: str | None, out: Path) -> dict:
             await page.eval("document.getElementById('evidence').scrollIntoView()")
             await asyncio.sleep(0.6)
             await page.shot(out / "evidence-results-1440x900.png")
+            # ---------------------------------------------------------- Regression gate (M7) in Results
+            await page.eval("window.scrollTo(0, 0)")
+            await page.click(button("Replay a locked holdout attack"))
+            title = await page.until(
+                f"{TITLE}.startsWith('Gate') && !document.querySelector('.stage-overlay') && {TITLE}",
+                60,
+            )
+            await asyncio.sleep(1.0)
+            results["flows"]["gate_replay"] = {
+                "title": title,
+                **await page.eval(
+                    "({labels: [...document.querySelectorAll('.robot-label')].map(e => e.textContent), source: document.querySelector('.stage-head .badge')?.textContent ?? '', row: [...document.querySelectorAll('.controls-col .summary-box')].map(e => e.textContent).find(t => t.startsWith('Regression gate')), evidence: [...document.querySelectorAll('#evidence details > summary')].map(e => e.textContent).filter(t => /gate|holdout|gauntlet|Nominal walking|candidates/i.test(t))})"
+                ),
+            }
+            await page.shot(out / "flow-gate-replay-1440x900.png")
+            await page.eval(
+                "[...document.querySelectorAll('#evidence details')].filter(d => /holdout|gauntlet/i.test(d.querySelector('summary').textContent)).forEach(d => d.open = true)"
+            )
+            await page.eval("document.getElementById('evidence').scrollIntoView()")
+            await asyncio.sleep(0.6)
+            await page.shot(out / "evidence-gate-1440x900.png")
+            await page.eval(
+                "[...document.querySelectorAll('#evidence details')].find(d => /gauntlet/i.test(d.querySelector('summary').textContent)).scrollIntoView()"
+            )
+            await asyncio.sleep(0.4)
+            await page.shot(out / "evidence-gate-gauntlet-1440x900.png")
             await page.call(
                 "Page.navigate", url=base + "/?tab=harden&hreplay=preset-v1:nope:baseline"
             )
@@ -502,6 +528,11 @@ async def run(base: str, nokey: str | None, out: Path) -> dict:
                     "?tab=hardening&hreplay=preset-v1:m4-cmaes-s0:baseline",
                     "Hardening",
                     "Harden controller",
+                ),
+                (
+                    "?tab=results&greplay=cand-ea7b9dbc0bbd:gx-m5-mu0.3-100N-588:baseline",
+                    "Gate",
+                    "Results",
                 ),
             ]
             if sc:
@@ -543,7 +574,8 @@ async def run(base: str, nokey: str | None, out: Path) -> dict:
                 await page.size(width, height)
                 for name, query, prefix in (("sample", "?tab=results", "Sample"),
                                             ("harden", "?tab=harden&hreplay=preset-v1:m4-cmaes-s0:baseline", "Hardening"),
-                                            ("harden-matched", "?tab=harden&hreplay=preset-v1:m2-100N-500:matched", "Hardening")):  # fmt: skip
+                                            ("harden-matched", "?tab=harden&hreplay=preset-v1:m2-100N-500:matched", "Hardening"),
+                                            ("gate", "?tab=results&greplay=cand-ea7b9dbc0bbd:lt-m4-cmaes-s7:baseline", "Gate")):  # fmt: skip
                     await page.call("Page.navigate", url=base + "/" + query)
                     await page.until(
                         f"{TITLE}.startsWith({json.dumps(prefix)}) && !document.querySelector('.stage-overlay')",
@@ -607,6 +639,17 @@ def main() -> int:
     ]
     if flows["harden_replay"].get("page_text_promoted"):
         failed.append("harden_replay.promotion_wording")
+    if not (flows["harden_replay"].get("status_pill") or "").startswith(
+        "Promoted by gate-v1 as v1-"
+    ):
+        failed.append("harden_replay.gate_status_pill")
+    if "not evaluated" not in (flows["harden_run"].get("status_pill") or ""):
+        failed.append("harden_run.executed_candidate_not_promoted")
+    gate = flows.get("gate_replay", {})
+    if "matches gate-v1 result" not in gate.get("source", ""):
+        failed.append("gate_replay.verification")
+    if not any(lbl.strip().startswith("Promoted v1") for lbl in gate.get("labels", [])):
+        failed.append("gate_replay.labels")
     print(json.dumps(flows, indent=1)[:6000])
     print(
         "FAILED: " + ", ".join(failed)

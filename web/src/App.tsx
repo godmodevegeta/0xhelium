@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   COLORS,
+  gateApi,
   hardeningApi,
   type DiscoveryInfo,
+  type GateInfo,
   type HardeningInfo,
   type HiddenPhase as HiddenPhaseData,
   type LiveStress as LiveStressData,
@@ -47,6 +49,7 @@ export function App() {
   const [discovery, setDiscovery] = useState<DiscoveryInfo | null>(null);
   const [designer, setDesigner] = useState<ScenarioConfig | null>(null);
   const [hardening, setHardening] = useState<HardeningInfo | null>(null);
+  const [gate, setGate] = useState<GateInfo | null>(null);
   const [replay, setReplay] = useState<Current | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [loadingTitle, setLoadingTitle] = useState<string | null>(null);
@@ -133,6 +136,7 @@ export function App() {
     refreshDiscovery();
     refreshDesigner();
     refreshHardening();
+    gateApi.info().then(setGate).catch((e) => setError(String(e)));
     api.model().then(setModel).catch((e) => setError(String(e)));
     // Deep links: ?replay=<start substep> (recorded sweep), ?scenario_replay=<run>:<trial>:<ghost>,
     // ?frame=<n> (initial frame). Mode components handle ?run=, ?hrun=, ?hreplay=, &dreplay=.
@@ -203,13 +207,13 @@ export function App() {
               </ModeContext.Provider>
               <ModeContext.Provider value={slot("hardening")}>
                 <div hidden={tab !== "hardening"}>
-                  {hardening ? <Hardening info={hardening} show={show} onRefresh={refreshHardening} replaying={loadingKey} /> : <p className="muted">Loading…</p>}
+                  {hardening ? <Hardening info={hardening} gate={gate} show={show} onRefresh={refreshHardening} replaying={loadingKey} /> : <p className="muted">Loading…</p>}
                 </div>
               </ModeContext.Provider>
               <ModeContext.Provider value={slot("results")}>
                 <div hidden={tab !== "results"}>
                   {hidden ? (
-                    <Results hidden={hidden} live={live} discovery={discovery} designer={designer} hardening={hardening}
+                    <Results hidden={hidden} live={live} discovery={discovery} designer={designer} hardening={hardening} gate={gate}
                       onHidden={replayHidden} onLive={replayLive} onDiscovery={replayDiscovery} onScenario={replayScenario} show={show}
                       replaying={loadingKey} hiddenLoading={hiddenLoading} />
                   ) : <p className="muted">Loading…</p>}
@@ -231,8 +235,9 @@ export function App() {
         </main>
         <footer>
           Simulation results only: one simulator, an idealized trunk force, flat ground with a uniform friction coefficient, a rigid welded
-          payload box. No claim about the real robot or about conditions other than the ones listed. Hardening results are candidates pending
-          the M7 regression gate.
+          payload box. No claim about the real robot or about conditions other than the ones listed. Stress, Discover and Design evaluate the
+          frozen baseline (v0). A hardening run only produces a candidate; the pre-registered regression gate (gate-v1) alone moves the policy
+          registry pointer.
         </footer>
       </div>
     </JobContext.Provider>

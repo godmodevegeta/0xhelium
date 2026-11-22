@@ -1,14 +1,16 @@
-// Results: the recorded evidence of M2–M6 in one place (precomputed presets plus recent server
+// Results: the recorded evidence of M2–M7 in one place (precomputed presets plus recent server
 // runs), each with a replay into the shared stage. Replaces the M3–M6 "Hidden Phase" tab; the
 // recorded sweep view lives here.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   COLORS,
   fmt,
+  gateApi,
   hardeningApi,
   pct,
   type CompactTrial,
   type DiscoveryInfo,
+  type GateInfo,
   type HardeningInfo,
   type HiddenPhase as HiddenPhaseData,
   type LiveStress,
@@ -16,6 +18,7 @@ import {
   type ScenarioConfig,
 } from "../api";
 import { PALETTE } from "../theme";
+import { gateHeadline, GateEvidence } from "./GateEvidence";
 import { Details, Evidence, EvidenceLink, ModeIntro } from "./Workspace";
 
 interface Props {
@@ -24,6 +27,7 @@ interface Props {
   discovery: DiscoveryInfo | null;
   designer: ScenarioConfig | null;
   hardening: HardeningInfo | null;
+  gate: GateInfo | null;
   onHidden: (substep: number) => void;
   onLive: (runId: string, trial: number) => void;
   onDiscovery: (runId: string, which: "final" | "search") => void;
@@ -33,7 +37,7 @@ interface Props {
   hiddenLoading: number | null;
 }
 
-export function Results({ hidden, live, discovery, designer, hardening, onHidden, onLive, onDiscovery, onScenario, show, replaying, hiddenLoading }: Props) {
+export function Results({ hidden, live, discovery, designer, hardening, gate, onHidden, onLive, onDiscovery, onScenario, show, replaying, hiddenLoading }: Props) {
   const [selected, setSelected] = useState<number>(hidden.verified_failure_substep);
   const att = hidden.aggregates.attacked;
   const failing = hidden.trials.filter((t) => t.outcome === "fell");
@@ -46,6 +50,21 @@ export function Results({ hidden, live, discovery, designer, hardening, onHidden
   const latestScenario = designer?.runs.find((r) => r.status === "done");
   const replayCandidate = (key: string, id: string, episode: string) =>
     show(`hardening/${key}/${episode}/baseline`, `Hardening · ${episode} · candidate ${id.slice(5, 13)} vs frozen baseline`, () => hardeningApi.replay(key, episode, "baseline"));
+  const replayGate = (candidate: string, episode: string, ghost: "baseline" | "matched" = "baseline") =>
+    show(`gate/${candidate}/${episode}/${ghost}`, `Gate · ${episode} · candidate ${candidate.slice(5, 13)} vs frozen baseline`, () => gateApi.replay(candidate, episode, ghost));
+  const primary = gate?.candidates?.find((c) => c.primary);
+  const gateText = gate ? gateHeadline(gate) : null;
+  const firstRecovered = primary?.G2_holdout.recovered[0];
+  const presetGate = preset?.gate_status;
+  const linked = useRef(false);
+  useEffect(() => {
+    // Deep link: ?tab=results&greplay=<candidate>:<episode>:<baseline|matched>
+    if (linked.current || !gate?.available) return;
+    linked.current = true;
+    const m = new URLSearchParams(window.location.search).get("greplay")?.match(/^(cand-[0-9a-f]{12}):([A-Za-z0-9._-]{1,64}):(baseline|matched)$/);
+    if (m) void replayGate(m[1], m[2], m[3] as "baseline" | "matched");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gate]);
 
   return (
     <>
@@ -84,13 +103,18 @@ export function Results({ hidden, live, discovery, designer, hardening, onHidden
               action={latestScenario ? { label: "Replay latest scenario", onClick: () => onScenario(latestScenario.run_id, 0, "primary", `Scenario ${latestScenario.name}`) } : undefined} disabled={busy} />
           )}
           {preset && (
-            <ResultRow label="Hardening candidate · M6" text={`sample candidate: training ${preset.record.measurements.train.candidate_summary?.attack_survived}/${preset.record.measurements.train.candidate_summary?.attacks}, validation ${preset.record.measurements.validation_preview.candidate_summary?.attack_survived}/${preset.record.measurements.validation_preview.candidate_summary?.attacks} attacks survived · pending M7`}
+            <ResultRow label="Hardening candidate · M6" text={`sample candidate: training ${preset.record.measurements.train.candidate_summary?.attack_survived}/${preset.record.measurements.train.candidate_summary?.attacks}, validation ${preset.record.measurements.validation_preview.candidate_summary?.attack_survived}/${preset.record.measurements.validation_preview.candidate_summary?.attacks} attacks survived · ${presetGate ? presetGate.label : "not evaluated by the regression gate"}`}
               action={{ label: "Replay baseline vs candidate", onClick: () => replayCandidate(preset.key, preset.record.candidate_id, "m2-100N-500") }} disabled={busy} />
+          )}
+          {gate && (
+            <ResultRow label="Regression gate · M7" text={gateText ?? "no gate result on this server"}
+              action={primary && firstRecovered ? { label: "Replay a locked holdout attack", onClick: () => replayGate(primary.candidate_id, firstRecovered) } : undefined} disabled={busy} />
           )}
         </div>
         <EvidenceLink />
       </div>
       <Details>
+        {gate && <GateEvidence gate={gate} onReplay={replayGate} busy={busy} />}
         <Evidence title="Recorded sweep (M2)" summary={`${att.physical_falls}/${att.valid_trials} timings fell · results ${hidden.results_sha256.slice(0, 8)}`} open>
           <SweepChart trials={hidden.trials} selected={selected} onSelect={(k) => { setSelected(k); }} />
           <SelectedTiming trial={hidden.trials.find((t) => t.start_substep === selected)!} onReplay={() => onHidden(selected)} busy={busy} />

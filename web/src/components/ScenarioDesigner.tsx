@@ -182,7 +182,7 @@ export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Pro
     <>
       <div className="mode">
         <ModeIntro eyebrow="Design scenario · friction × payload × shove" title="Test the robot against a disturbance">
-          <p>Pick a sample or describe one. The server validates every value and rejects, never clamps, anything out of range.</p>
+          <p>Pick a sample or describe one. The server validates every value and rejects, never clamps, anything out of range. Controller: frozen baseline v0.</p>
         </ModeIntro>
 
         <div className="group">

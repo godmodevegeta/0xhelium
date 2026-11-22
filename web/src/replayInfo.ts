@@ -7,10 +7,12 @@ export interface RobotNames {
 }
 
 export function robotNames(r: Replay): RobotNames {
-  if (r.mode === "hardening") {
+  if (r.mode === "hardening" || r.mode === "gate") {
+    // "Promoted" only when the gate's registry version exists for this exact candidate id.
+    const promoted = r.gate_status?.status === "promoted" && r.gate_status.version;
     return {
-      main: "Candidate · frozen policy + reflex",
-      ghost: r.ghost?.kind === "matched" ? "Frozen baseline · no shove" : "Frozen baseline",
+      main: promoted ? `Promoted ${r.gate_status!.version!.split("-")[0]} · policy + reflex` : "Candidate · frozen policy + reflex",
+      ghost: r.ghost?.kind === "matched" ? "Frozen baseline v0 · no shove" : "Frozen baseline v0",
     };
   }
   if (r.mode === "single" || r.mode === "suite") {
