@@ -472,6 +472,68 @@ def _cmd_scenario(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_harden(args: argparse.Namespace) -> int:
+    root = Path(args.root).resolve()
+    from robustlab.assets import AssetError, verify_assets
+
+    issues = verify_assets(root)
+    if issues:
+        for issue in issues:
+            print(f"FAIL  {issue}", file=sys.stderr)
+        return EXIT_ASSETS
+    from robustlab.adapt.harden import (
+        CANDIDATE_NAME,
+        HardenConfig,
+        HardenConfigError,
+        default_workers,
+        load_calibration,
+        run_hardening,
+        write_candidate,
+    )
+    from robustlab.adapt.sets import SetsError, load_sets
+    from robustlab.experiments.stack import load_stack
+
+    out = Path(args.out)
+    if (out / CANDIDATE_NAME).exists():
+        print(f"harden: {out / CANDIDATE_NAME} exists; candidates are immutable", file=sys.stderr)
+        return EXIT_WRITE
+    try:
+        config = HardenConfig(seed=args.seed, popsize=args.popsize, sigma0=args.sigma0,
+                              max_generations=args.generations, max_rollouts=args.max_rollouts,
+                              wall_clock_s=args.wall_clock,
+                              workers=args.workers or default_workers(), focus=args.focus)  # fmt: skip
+        stack = load_stack(root, Path(args.policy), "fall-contact")
+        sets = load_sets(root / args.sets, root)
+        calibration = load_calibration(root / args.calibration, stack.policy.sha256)
+    except (HardenConfigError, SetsError, AssetError, ValueError, OSError) as exc:
+        print(f"harden: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+
+    def progress(entry: dict) -> None:
+        print(f"generation {entry['generation']:>3}  rollouts {entry['rollouts']:>5}  "
+              f"best J {entry['best_objective']:.4f} (baseline {entry['baseline_objective']:.4f})  "
+              f"attacks survived {entry['best_attack_survived']}/{entry['attacks']}  "
+              f"{entry['elapsed_s']:.1f} s", flush=True)  # fmt: skip
+
+    try:
+        record = run_hardening(stack, calibration, sets, config, on_progress=progress)
+    except HardenConfigError as exc:
+        print(f"harden: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    path = write_candidate(out, record)
+    acc, res = record["accounting"], record["result"]
+    print(f"stop             {res['stop_reason']} after {res['generations_completed']} generations")
+    print(f"rollouts         {acc['total_rollouts']} (optimization {acc['optimization_rollouts']}, "
+          f"baseline {acc['baseline_rollouts']}, references {acc['reference_rollouts']}, "
+          f"validation preview {acc['validation_preview_rollouts']})")  # fmt: skip
+    print(f"wall             {record['timing']['wall_s']:.1f} s on {config.workers} worker(s)")
+    print(f"result           {res['statement']}")
+    print(f"candidate        {record['candidate_id']} (status {record['status']})")
+    print(f"reproducibility  {record['reproducibility_sha256']}")
+    print(f"record           {path}")
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     import os
 
@@ -595,6 +657,24 @@ def build_parser() -> argparse.ArgumentParser:
     scenario.add_argument("--overwrite", action="store_true")
     scenario.add_argument("--root", default=".")
     scenario.set_defaults(func=_cmd_scenario)
+
+    harden = subparsers.add_parser(
+        "harden", help="search a bounded residual reflex around the frozen policy (candidate only)"
+    )
+    harden.add_argument("--out", required=True, help="output directory for candidate.json")
+    harden.add_argument("--seed", type=int, default=0)
+    harden.add_argument("--generations", type=int, default=12)
+    harden.add_argument("--popsize", type=int, default=8)
+    harden.add_argument("--sigma0", type=float, default=0.3)
+    harden.add_argument("--max-rollouts", type=int, default=2000, help="optimization rollouts")
+    harden.add_argument("--wall-clock", type=float, default=60.0, help="wall-clock cap, s")
+    harden.add_argument("--workers", type=int, default=0, help="processes (0 = automatic)")
+    harden.add_argument("--focus", default=None, help="one confirmed training attack id")
+    harden.add_argument("--sets", default="examples/m6/hardening-sets-v1.json")
+    harden.add_argument("--calibration", default="examples/m6/reflex-calibration-v1.json")
+    harden.add_argument("--policy", default="policies/go1-walk-s0.json")
+    harden.add_argument("--root", default=".")
+    harden.set_defaults(func=_cmd_harden)
 
     serve = subparsers.add_parser("serve", help="start the web app (needs the server extra)")
     serve.add_argument("--host", default="127.0.0.1")

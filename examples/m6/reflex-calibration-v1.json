@@ -1,0 +1,136 @@
+{
+ "schema_version": 1,
+ "kind": "robustlab-reflex-calibration",
+ "signals": [
+  "gravity_x",
+  "gravity_y",
+  "gyro_x",
+  "gyro_y",
+  "lateral_velocity_error"
+ ],
+ "center": [
+  0.01634005457162857,
+  0.004588531330227852,
+  0.0005502046260517091,
+  -0.0021893609082326293,
+  0.001445759553462267
+ ],
+ "half_width": [
+  0.04140315391123295,
+  0.09335288219153881,
+  2.687731438985793,
+  1.0670793425524607,
+  0.3014457714743912
+ ],
+ "source": {
+  "method": "median and largest absolute deviation from it, per signal, over all Ticks of base-policy episodes without pushes",
+  "seconds": 5.0,
+  "episodes": [
+   {
+    "command": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "ticks": 250,
+    "digest": "96af02c85f9b285c5b8c7f7f9260d6b2eab55a5030c67c5e3e8cae91523fc1c4"
+   },
+   {
+    "command": [
+     0.5,
+     0.0,
+     0.0
+    ],
+    "ticks": 250,
+    "digest": "8ef2741870f73249f46b4d30c6cd2f336b9599ecbb1e6c62e877af87334ae93c"
+   },
+   {
+    "command": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "ticks": 250,
+    "digest": "0a91633308eec157358e5fdaac0a2b343bc18411673ecb76e4ca0c66c4c7c797"
+   },
+   {
+    "command": [
+     1.0,
+     0.0,
+     0.5
+    ],
+    "ticks": 250,
+    "digest": "7c36dfb6d780e6eadacd3210fb1118123a54fa03383133c602d3b70845e586a3"
+   },
+   {
+    "command": [
+     1.0,
+     0.0,
+     -0.5
+    ],
+    "ticks": 250,
+    "digest": "481d41c330755b253397260b1a9f6d786f2f83227e9c1bbae3364660cd9a9f00"
+   },
+   {
+    "command": [
+     0.5,
+     0.3,
+     0.0
+    ],
+    "ticks": 250,
+    "digest": "560d34c7a315edbd85ade756cc10d46c7b3238bb1fe27fcd9f6e44010ddd7b41"
+   },
+   {
+    "command": [
+     0.5,
+     -0.3,
+     0.0
+    ],
+    "ticks": 250,
+    "digest": "77f6cddfebb8bb78336cfad746adf2854834be979cdcc369e92fafeeede5a8e1"
+   },
+   {
+    "command": [
+     1.5,
+     0.0,
+     0.0
+    ],
+    "ticks": 250,
+    "digest": "60a47ad03d795cb15926e8d6232811a668b4f6b438da3b14bb9ffa8660762418"
+   },
+   {
+    "command": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "ground_friction_mu": 0.45,
+    "ticks": 250,
+    "digest": "4e0f6ee366e969878c995f75af7a8ec66a1a93c99e188446c3a53614bb1ca07b"
+   },
+   {
+    "command": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "ground_friction_mu": 1.0,
+    "ticks": 250,
+    "digest": "090f7ac90f52727d109d6976f8ae0895f8093b33e4d7124b217c388dec9af27f"
+   },
+   {
+    "command": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "payload_kg": 2.5,
+    "ticks": 250,
+    "digest": "96c7499a752bdef35129878e4be64e9f3b395401876dff199953336a1712f611"
+   }
+  ],
+  "policy_sha256": "42138b2b29663a8f72575af7354ab59b60f381446ee9e4ec2b45d83a0881a982",
+  "scene": "fall-contact",
+  "ticks": 2750
+ }
+}

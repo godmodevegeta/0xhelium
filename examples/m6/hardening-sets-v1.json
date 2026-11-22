@@ -1,0 +1,563 @@
+{
+ "schema_version": 1,
+ "kind": "robustlab-hardening-sets",
+ "name": "hardening-sets-v1",
+ "gait_period_s": 0.44,
+ "notes": [
+  "Confirmed failures were recorded as baseline falls by M2-M5 on the fall-contact scene; every M6 run re-measures the baseline.",
+  "Training push starts lie at gait phases 42-68 substeps (of 110); validation-preview phases are 14-40 and 84. Timings at the same phase of the 0.44 s gait are strongly correlated, so different timestamps are not independent tests.",
+  "Training variants are seeded perturbations (force +-10%, direction +-10 deg, start +-4 and duration +-3 substeps) and are not confirmed failures.",
+  "The locked test set is for M7 and is refused by all M6 evaluation code."
+ ],
+ "train": {
+  "episodes": [
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m2-100N-500",
+    "source": "m2 grid: 100 N toward the right, 0.1 s, start substep 500; recorded fall",
+    "push": {
+     "force_n": 100,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 500,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m2-100N-611",
+    "source": "m2 grid: 100 N toward the right, 0.1 s, start substep 611; recorded fall",
+    "push": {
+     "force_n": 100,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 611,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m2-100N-702",
+    "source": "m2 grid: 100 N toward the right, 0.1 s, start substep 702; recorded fall",
+    "push": {
+     "force_n": 100,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 702,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m3-150N-610",
+    "source": "m3 grid: 150 N toward the right, 0.1 s, start substep 610; recorded fall",
+    "push": {
+     "force_n": 150,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 610,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-cmaes-s1",
+    "source": "M4 discovery cmaes-s1 final (shrunk), confirmed fall; results 1739b8c5e01c",
+    "push": {
+     "force_n": 86.0,
+     "direction": [
+      -0.13744454603714668,
+      0.9905094632383088,
+      0.0
+     ],
+     "start_substep": 718,
+     "duration_substeps": 44
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-cmaes-s12",
+    "source": "M4 discovery cmaes-s12 final (shrunk), confirmed fall; results 6c4b7881f4df",
+    "push": {
+     "force_n": 100.4,
+     "direction": [
+      -0.22495105434386503,
+      0.9743700647852352,
+      0.0
+     ],
+     "start_substep": 504,
+     "duration_substeps": 37
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-cmaes-s3",
+    "source": "M4 discovery cmaes-s3 final (search), confirmed fall; results 49d56382b40f",
+    "push": {
+     "force_n": 116.3,
+     "direction": [
+      0.22325011601095052,
+      -0.974761194191222,
+      0.0
+     ],
+     "start_substep": 508,
+     "duration_substeps": 20
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-cmaes-s14",
+    "source": "M4 discovery cmaes-s14 final (shrunk), confirmed fall; results e65af10732d1",
+    "push": {
+     "force_n": 135.4,
+     "direction": [
+      -0.2621891786408644,
+      -0.9650164944723115,
+      0.0
+     ],
+     "start_substep": 608,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "id": "nominal-forward-1.0",
+    "kind": "nominal",
+    "command": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "source": "nominal walking"
+   },
+   {
+    "id": "nominal-forward-0.5",
+    "kind": "nominal",
+    "command": [
+     0.5,
+     0.0,
+     0.0
+    ],
+    "source": "nominal walking"
+   }
+  ],
+  "variants": {
+   "seed": 6,
+   "per_attack": 1,
+   "jitter": {
+    "force_rel": 0.1,
+    "direction_deg": 10.0,
+    "start_substeps": 4,
+    "duration_substeps": 3
+   }
+  }
+ },
+ "validation_preview": {
+  "episodes": [
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m3-150N-564",
+    "source": "m3 grid: 150 N toward the right, 0.1 s, start substep 564; recorded fall",
+    "push": {
+     "force_n": 150,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 564,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m3-150N-590",
+    "source": "m3 grid: 150 N toward the right, 0.1 s, start substep 590; recorded fall",
+    "push": {
+     "force_n": 150,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 590,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m3-150N-694",
+    "source": "m3 grid: 150 N toward the right, 0.1 s, start substep 694; recorded fall",
+    "push": {
+     "force_n": 150,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 694,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-cmaes-s0",
+    "source": "M4 discovery cmaes-s0 final (shrunk), confirmed fall; results 2d23b4b6d440",
+    "push": {
+     "force_n": 123.9,
+     "direction": [
+      -0.46947156278589075,
+      -0.882947592858927,
+      0.0
+     ],
+     "start_substep": 571,
+     "duration_substeps": 37
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-random-s11",
+    "source": "M4 discovery random-s11 final (search), confirmed fall; results a424350e0faa",
+    "push": {
+     "force_n": 82.6,
+     "direction": [
+      -0.047106450709642776,
+      0.99888987496197,
+      0.0
+     ],
+     "start_substep": 577,
+     "duration_substeps": 50
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-random-s13",
+    "source": "M4 discovery random-s13 final (shrunk), confirmed fall; results 1e865f622469",
+    "push": {
+     "force_n": 64.1,
+     "direction": [
+      0.41628079226040177,
+      -0.9092361090470683,
+      0.0
+     ],
+     "start_substep": 575,
+     "duration_substeps": 43
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-random-s0",
+    "source": "M4 discovery random-s0 final (search), confirmed fall; results ff72a5b9dc0c",
+    "push": {
+     "force_n": 68.1,
+     "direction": [
+      -0.09758289975914979,
+      -0.9952273999818312,
+      0.0
+     ],
+     "start_substep": 691,
+     "duration_substeps": 39
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m4-random-s15",
+    "source": "M4 discovery random-s15 final (shrunk), confirmed fall; results 38c9043ca09f",
+    "push": {
+     "force_n": 132.3,
+     "direction": [
+      0.19594614424251766,
+      -0.980614658546613,
+      0.0
+     ],
+     "start_substep": 524,
+     "duration_substeps": 37
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "m5-100N-567-mu0.3",
+    "source": "m5 grid: 100 N toward the right, 0.1 s, start substep 567; recorded fall",
+    "push": {
+     "force_n": 100,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 567,
+     "duration_substeps": 25
+    },
+    "ground_friction_mu": 0.3
+   },
+   {
+    "id": "val-nominal-turn-left",
+    "kind": "nominal",
+    "command": [
+     1.0,
+     0.0,
+     0.5
+    ],
+    "source": "nominal walking"
+   },
+   {
+    "id": "val-nominal-stand",
+    "kind": "nominal",
+    "command": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "source": "nominal walking"
+   },
+   {
+    "id": "val-nominal-mu0.3-3kg",
+    "kind": "nominal",
+    "command": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "source": "M5 combined physics without the push",
+    "ground_friction_mu": 0.3,
+    "payload_kg": 3.0,
+    "payload_offset_xyz_m": [
+     0.0,
+     0.0,
+     0.04
+    ]
+   }
+  ]
+ },
+ "locked_test": {
+  "episodes": [
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m4-cmaes-s7",
+    "source": "M4 discovery cmaes-s7 final (shrunk), confirmed fall; results 1300f8a901ae",
+    "push": {
+     "force_n": 104.3,
+     "direction": [
+      -0.006981260297961302,
+      -0.9999756307053947,
+      0.0
+     ],
+     "start_substep": 613,
+     "duration_substeps": 23
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m4-cmaes-s17",
+    "source": "M4 discovery cmaes-s17 final (shrunk), confirmed fall; results 922b332c9568",
+    "push": {
+     "force_n": 101.6,
+     "direction": [
+      -0.19594614424251758,
+      0.980614658546613,
+      0.0
+     ],
+     "start_substep": 615,
+     "duration_substeps": 36
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m4-random-s8",
+    "source": "M4 discovery random-s8 final (shrunk), confirmed fall; results c55e5ce88ef2",
+    "push": {
+     "force_n": 142.3,
+     "direction": [
+      -0.34693565157325573,
+      0.9378889346118977,
+      0.0
+     ],
+     "start_substep": 509,
+     "duration_substeps": 21
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m4-random-s19",
+    "source": "M4 discovery random-s19 final (shrunk), confirmed fall; results dbca7f75006d",
+    "push": {
+     "force_n": 136.4,
+     "direction": [
+      -0.6768759696826606,
+      0.7360970871197344,
+      0.0
+     ],
+     "start_substep": 595,
+     "duration_substeps": 36
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m4-random-s5",
+    "source": "M4 discovery random-s5 final (shrunk), confirmed fall; results 3a87a57bdf72",
+    "push": {
+     "force_n": 110.8,
+     "direction": [
+      0.3567379993196246,
+      -0.9342044743210297,
+      0.0
+     ],
+     "start_substep": 620,
+     "duration_substeps": 31
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m3-150N-588",
+    "source": "m3 grid: 150 N toward the right, 0.1 s, start substep 588; recorded fall",
+    "push": {
+     "force_n": 150,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 588,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m3-150N-514",
+    "source": "m3 grid: 150 N toward the right, 0.1 s, start substep 514; recorded fall",
+    "push": {
+     "force_n": 150,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 514,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m5-100N-754-mu0.3",
+    "source": "m5 grid: 100 N toward the right, 0.1 s, start substep 754; recorded fall",
+    "push": {
+     "force_n": 100,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 754,
+     "duration_substeps": 25
+    },
+    "ground_friction_mu": 0.3
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m5-100N-593-mu0.3",
+    "source": "m5 grid: 100 N toward the right, 0.1 s, start substep 593; recorded fall",
+    "push": {
+     "force_n": 100,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 593,
+     "duration_substeps": 25
+    },
+    "ground_friction_mu": 0.3
+   },
+   {
+    "kind": "attack",
+    "confirmed_failure": true,
+    "id": "lt-m2-100N-725",
+    "source": "m2 grid: 100 N toward the right, 0.1 s, start substep 725; recorded fall",
+    "push": {
+     "force_n": 100,
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "start_substep": 725,
+     "duration_substeps": 25
+    }
+   },
+   {
+    "id": "lt-nominal-turn-right",
+    "kind": "nominal",
+    "command": [
+     1.0,
+     0.0,
+     -0.5
+    ],
+    "source": "nominal walking"
+   },
+   {
+    "id": "lt-nominal-fast",
+    "kind": "nominal",
+    "command": [
+     1.5,
+     0.0,
+     0.0
+    ],
+    "source": "nominal walking"
+   },
+   {
+    "id": "lt-nominal-5kg-top",
+    "kind": "nominal",
+    "command": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "source": "M5 payload without a push",
+    "payload_kg": 5.0,
+    "payload_offset_xyz_m": [
+     0.0,
+     0.0,
+     0.08
+    ]
+   }
+  ],
+  "sha256": "599888a34071e64ba55aac0cbafbf9954800c38497ab97a1071c06f7a2e33ce7"
+ }
+}
