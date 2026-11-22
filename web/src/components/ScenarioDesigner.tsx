@@ -18,7 +18,7 @@ import {
   type ScenarioStatus,
   type ValidateResponse,
 } from "../api";
-import { Details, Panel } from "./Workspace";
+import { Advanced, Details, Evidence, EvidenceLink, ModeIntro, useJobReport } from "./Workspace";
 
 type Ghost = "primary" | "matched" | "original";
 
@@ -177,149 +177,146 @@ export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Pro
   const push = doc.push;
 
   const result = status?.status === "done" ? status.result : undefined;
+  useJobReport(running, `Scenario run ${status?.completed ?? 0}/${status?.total ?? 1}`);
   return (
     <>
-      <Panel eyebrow="Scenario Designer · friction × payload × push" title="Compose a physical condition, check it, then simulate it">
-        <p className="small">
-          Floor friction, a payload box welded to the trunk and an optional timed shove. The server validates every value (out-of-range
-          values are rejected, never clamped) and reports the friction MuJoCo resolves at the feet before anything runs.
-        </p>
-        <div className="card inset action">
-          <ValidationLine data={current} validating={validating} />
-          <div className="row wrap">
-            <button className="primary" onClick={() => void run("single")} disabled={!canRun}>▶ Run single paired trial</button>
-            <button className="primary" onClick={() => void run("suite")} disabled={!canRun || !valid?.runnable.suite}>▶ Run {config.suite_defaults.trials}-trial suite</button>
-            <input className="seed" placeholder="suite seed (blank = new)" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running || !valid?.runnable.suite} />
+      <div className="mode">
+        <ModeIntro eyebrow="Design scenario · friction × payload × shove" title="Test the robot against a disturbance">
+          <p>Pick a sample or describe one. The server validates every value and rejects, never clamps, anything out of range.</p>
+        </ModeIntro>
+
+        <div className="group">
+          <div className="group-label" id="samples-label">Samples</div>
+          <div className="chip-row" role="group" aria-labelledby="samples-label">
+            {config.presets.map((p) => (
+              <button key={p.id} className="chip-btn" aria-pressed={presetId === p.id} onClick={() => loadPreset(p.id)} title={p.note}>{p.id}</button>
+            ))}
           </div>
-          {valid && !valid.runnable.suite && <p className="muted small">Suite unavailable: {valid.runnable.suite_reason}.</p>}
-          {running && (
-            <>
-              <div className="progress"><div style={{ width: `${(100 * (status?.completed ?? 0)) / (status?.total ?? 1)}%` }} /></div>
-              <p className="muted small">Executing {status?.run_id}… {status?.completed ?? 0}/{status?.total ?? 1}</p>
-            </>
-          )}
-          {error && <p className="error">{error}</p>}
-          {status?.status === "failed" && <p className="error">Run failed: {status.error}</p>}
-          {status && result && <ResultLine status={status} ghost={ghost} onReplay={onReplay} replaying={replaying} />}
         </div>
-          <div className="card inset">
-            <div className="sweep-head">
-              <h3>Describe it (optional)</h3>
-              {compiler.configured ? (
-                <span className="badge ok">OpenRouter configured · {compiler.model}</span>
-              ) : (
-                <span className="badge warn">OpenRouter not configured (OPENROUTER_API_KEY unset on the server)</span>
-              )}
-            </div>
-            <textarea
-              className="prompt"
-              maxLength={compiler.limits.max_prompt_chars}
-              placeholder="e.g. sideways push from the left while walking on wet tile"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              disabled={!compiler.configured || compiling}
-            />
-            <div className="examples">
+
+        <div className="summary-box" aria-live="polite">
+          <div><span className="muted">Scenario</span> <strong>{doc.name}</strong> · {describeDoc(doc, config.nominal_mu)}</div>
+          <ValidationLine data={current} validating={validating} />
+          {compileId && <div className="xsmall muted">From OpenRouter compile {compileId}; edits are recorded as "edited after compile".</div>}
+        </div>
+
+        <div className="cta">
+          <button className="primary big wide" onClick={() => void run("single")} disabled={!canRun}>
+            {running ? `Running on the server… ${status?.completed ?? 0}/${status?.total ?? 1}` : "Run scenario"}
+          </button>
+          <div className="inline-status">
+            {!running && !result && <span>One paired run: the scenario, its matched baseline and the original nominal.</span>}
+            {running && <div className="progress"><div style={{ width: `${(100 * (status?.completed ?? 0)) / (status?.total ?? 1)}%` }} /></div>}
+            {error && <span className="error">{error}</span>}
+            {status?.status === "failed" && <span className="error">Run failed: {status.error}</span>}
+            {status && result && <ResultLine status={status} ghost={ghost} onReplay={onReplay} replaying={replaying} />}
+          </div>
+        </div>
+
+        <div className="composer">
+          <label className="group-label" htmlFor="scenario-prompt">Or describe it in words</label>
+          <textarea id="scenario-prompt" className="prompt" maxLength={compiler.limits.max_prompt_chars}
+            placeholder={compiler.configured ? "e.g. sideways push from the left while walking on wet tile" : "OpenRouter is not configured on this server — use a sample or Advanced parameters"}
+            value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={!compiler.configured || compiling} />
+          <div className="composer-actions">
+            <button onClick={() => void compile(prompt)} disabled={!compiler.configured || compiling || prompt.trim() === ""}>
+              {compiling ? "Compiling…" : "Compile to parameters"}
+            </button>
+            <span className="xsmall muted">{compiler.configured ? `OpenRouter · ${compiler.model} proposes values; the server validates them` : "No OPENROUTER_API_KEY on the server"}</span>
+          </div>
+          {compiler.configured && (
+            <div className="chip-row" aria-label="Example descriptions">
               {config.examples.map((ex) => (
-                <button key={ex} onClick={() => setPrompt(ex)} disabled={!compiler.configured || compiling}>{ex}</button>
+                <button key={ex} className="chip-btn" onClick={() => setPrompt(ex)} disabled={compiling} title={ex}>{shortExample(ex)}</button>
               ))}
             </div>
-            <div className="row">
-              <button className="primary" onClick={() => void compile(prompt)} disabled={!compiler.configured || compiling || prompt.trim() === ""}>
-                {compiling ? "Compiling…" : "Compile with OpenRouter"}
-              </button>
-              <span className="muted small">
-                {compiler.configured
-                  ? `The model only proposes JSON values; the server validates them. ≤ ${compiler.limits.max_prompt_chars} chars, ${compiler.limits.timeout_s} s timeout.`
-                  : "Presets and the manual fields below work without a key."}
-              </span>
+          )}
+          {compileError && <p className="error small">Compile failed: {compileError}. Nothing was changed.</p>}
+          {compiled && <CompileResult result={compiled} />}
+        </div>
+
+        <Advanced summary="Advanced · edit parameters, run a 16-trial suite">
+          <fieldset>
+            <legend>Ground friction μ</legend>
+            <div className="param-row">
+              <label className="radio"><input type="checkbox" checked={mu === null} onChange={(e) => update((d) => { d.environment.ground_friction_mu = e.target.checked ? null : config.nominal_mu; })} /> trained floor ({config.nominal_mu})</label>
             </div>
-            {compileError && <p className="error">Compile failed: {compileError}. Nothing was changed.</p>}
-            {compiled && <CompileResult result={compiled} />}
-          </div>
+            {mu !== null && (
+              <NumberSlider value={mu} bounds={config.bounds["environment.ground_friction_mu"]} step={0.01} unit="" onChange={(v) => update((d) => { d.environment.ground_friction_mu = v; })} />
+            )}
+            <div className="muted small">Sets the floor geom's sliding friction; MuJoCo resolves every floor contact with the floor's value (higher priority).</div>
+          </fieldset>
 
-          <div className="card inset">
-            <div className="sweep-head">
-              <h3>Parameters</h3>
-              <div className="examples">
-                {config.presets.map((p) => (
-                  <button key={p.id} className={presetId === p.id ? "tab active" : ""} onClick={() => loadPreset(p.id)} title={p.note}>{p.id}</button>
-                ))}
-              </div>
+          <fieldset>
+            <legend>Payload (welded box on the trunk)</legend>
+            <NumberSlider label="mass" value={doc.payload.mass_kg} bounds={config.bounds["payload.mass_kg"]} step={0.1} unit="kg" onChange={(v) => update((d) => { d.payload.mass_kg = v; })} />
+            {(["x forward", "y left", "z up"] as const).map((axis, i) => (
+              <NumberSlider key={axis} label={`CoM ${axis}`} value={doc.payload.offset_xyz_m[i]} bounds={config.bounds[`payload.offset_xyz_m[${i}]`]} step={0.005} unit="m" onChange={(v) => update((d) => { d.payload.offset_xyz_m[i] = v; })} disabled={doc.payload.mass_kg === 0} />
+            ))}
+            <div className="muted small">Offset is relative to the trunk centre of mass, in trunk axes. At 0 kg no body is added (the original model is used).</div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Push (trunk force, initial-heading frame)</legend>
+            <div className="param-row">
+              <label className="radio">
+                <input type="checkbox" checked={push !== null} onChange={(e) => update((d) => { if (e.target.checked) d.push = { ...lastPush.current }; else { if (d.push) lastPush.current = d.push; d.push = null; } })} /> apply a push
+              </label>
             </div>
-            {compileId && <p className="muted small">Values came from OpenRouter compile {compileId}; edits are recorded as "edited after compile".</p>}
+            {push && (
+              <>
+                <NumberSlider label="force" value={push.force_n} bounds={config.bounds["push.force_n"]} step={1} unit="N" onChange={(v) => update((d) => { d.push!.force_n = v; })} />
+                <div className="param-row">
+                  <span>direction</span>
+                  <input type="number" value={push.direction_deg} step={15} onChange={(e) => update((d) => { d.push!.direction_deg = Number(e.target.value); })} /> °
+                  <select value={DIRECTIONS.find((x) => x.deg === push.direction_deg)?.deg ?? ""} onChange={(e) => update((d) => { d.push!.direction_deg = Number(e.target.value); })}>
+                    {!DIRECTIONS.some((x) => x.deg === push.direction_deg) && <option value="">custom</option>}
+                    {DIRECTIONS.map((x) => <option key={x.deg} value={x.deg}>{x.label}</option>)}
+                  </select>
+                </div>
+                <NumberSlider label="start" value={push.start_s} bounds={[0, doc.horizon_s]} step={0.004} unit="s" onChange={(v) => update((d) => { d.push!.start_s = v; })} />
+                <NumberSlider label="duration" value={push.duration_s} bounds={config.bounds["push.duration_s"]} step={0.004} unit="s" onChange={(v) => update((d) => { d.push!.duration_s = v; })} />
+                <div className="muted small">0° pushes forward, 90° pushes toward the robot's left, 270° toward its right.</div>
+              </>
+            )}
+          </fieldset>
 
-            <fieldset>
-              <legend>Ground friction μ</legend>
-              <div className="param-row">
-                <label className="radio"><input type="checkbox" checked={mu === null} onChange={(e) => update((d) => { d.environment.ground_friction_mu = e.target.checked ? null : config.nominal_mu; })} /> trained floor ({config.nominal_mu})</label>
-              </div>
-              {mu !== null && (
-                <NumberSlider value={mu} bounds={config.bounds["environment.ground_friction_mu"]} step={0.01} unit="" onChange={(v) => update((d) => { d.environment.ground_friction_mu = v; })} />
-              )}
-              <div className="muted small">Sets the floor geom's sliding friction; MuJoCo resolves every floor contact with the floor's value (higher priority).</div>
-            </fieldset>
-
-            <fieldset>
-              <legend>Payload (welded box on the trunk)</legend>
-              <NumberSlider label="mass" value={doc.payload.mass_kg} bounds={config.bounds["payload.mass_kg"]} step={0.1} unit="kg" onChange={(v) => update((d) => { d.payload.mass_kg = v; })} />
-              {(["x forward", "y left", "z up"] as const).map((axis, i) => (
-                <NumberSlider key={axis} label={`CoM ${axis}`} value={doc.payload.offset_xyz_m[i]} bounds={config.bounds[`payload.offset_xyz_m[${i}]`]} step={0.005} unit="m" onChange={(v) => update((d) => { d.payload.offset_xyz_m[i] = v; })} disabled={doc.payload.mass_kg === 0} />
-              ))}
-              <div className="muted small">Offset is relative to the trunk centre of mass, in trunk axes. At 0 kg no body is added (the original model is used).</div>
-            </fieldset>
-
-            <fieldset>
-              <legend>Push (trunk force, initial-heading frame)</legend>
-              <div className="param-row">
-                <label className="radio">
-                  <input type="checkbox" checked={push !== null} onChange={(e) => update((d) => { if (e.target.checked) d.push = { ...lastPush.current }; else { if (d.push) lastPush.current = d.push; d.push = null; } })} /> apply a push
-                </label>
-              </div>
-              {push && (
-                <>
-                  <NumberSlider label="force" value={push.force_n} bounds={config.bounds["push.force_n"]} step={1} unit="N" onChange={(v) => update((d) => { d.push!.force_n = v; })} />
-                  <div className="param-row">
-                    <span>direction</span>
-                    <input type="number" value={push.direction_deg} step={15} onChange={(e) => update((d) => { d.push!.direction_deg = Number(e.target.value); })} /> °
-                    <select value={DIRECTIONS.find((x) => x.deg === push.direction_deg)?.deg ?? ""} onChange={(e) => update((d) => { d.push!.direction_deg = Number(e.target.value); })}>
-                      {!DIRECTIONS.some((x) => x.deg === push.direction_deg) && <option value="">custom</option>}
-                      {DIRECTIONS.map((x) => <option key={x.deg} value={x.deg}>{x.label}</option>)}
-                    </select>
-                  </div>
-                  <NumberSlider label="start" value={push.start_s} bounds={[0, doc.horizon_s]} step={0.004} unit="s" onChange={(v) => update((d) => { d.push!.start_s = v; })} />
-                  <NumberSlider label="duration" value={push.duration_s} bounds={config.bounds["push.duration_s"]} step={0.004} unit="s" onChange={(v) => update((d) => { d.push!.duration_s = v; })} />
-                  <div className="muted small">0° pushes forward, 90° pushes toward the robot's left, 270° toward its right.</div>
-                </>
-              )}
-            </fieldset>
-
-            <fieldset>
-              <legend>Task</legend>
-              <div className="param-row">
-                <span>command vx</span>
-                <input type="number" step={0.1} value={doc.command[0]} onChange={(e) => update((d) => { d.command[0] = Number(e.target.value); })} /> m/s
-                <span>vy</span>
-                <input type="number" step={0.1} value={doc.command[1]} onChange={(e) => update((d) => { d.command[1] = Number(e.target.value); })} />
-                <span>yaw</span>
-                <input type="number" step={0.1} value={doc.command[2]} onChange={(e) => update((d) => { d.command[2] = Number(e.target.value); })} /> rad/s
-              </div>
-              <div className="param-row">
-                <span>horizon</span>
-                <input type="number" step={0.5} value={doc.horizon_s} onChange={(e) => update((d) => { d.horizon_s = Number(e.target.value); })} /> s
-                <span>name</span>
-                <input type="text" value={doc.name} maxLength={64} onChange={(e) => update((d) => { d.name = e.target.value; })} />
-              </div>
-            </fieldset>
-          </div>
-      </Panel>
+          <fieldset>
+            <legend>Task</legend>
+            <div className="param-row">
+              <span>command vx</span>
+              <input type="number" step={0.1} value={doc.command[0]} onChange={(e) => update((d) => { d.command[0] = Number(e.target.value); })} /> m/s
+              <span>vy</span>
+              <input type="number" step={0.1} value={doc.command[1]} onChange={(e) => update((d) => { d.command[1] = Number(e.target.value); })} />
+              <span>yaw</span>
+              <input type="number" step={0.1} value={doc.command[2]} onChange={(e) => update((d) => { d.command[2] = Number(e.target.value); })} /> rad/s
+            </div>
+            <div className="param-row">
+              <span>horizon</span>
+              <input type="number" step={0.5} value={doc.horizon_s} onChange={(e) => update((d) => { d.horizon_s = Number(e.target.value); })} /> s
+              <span>name</span>
+              <input type="text" value={doc.name} maxLength={64} onChange={(e) => update((d) => { d.name = e.target.value; })} />
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>16-trial suite (varies only the shove start)</legend>
+            <div className="row wrap">
+              <input className="seed" aria-label="Suite seed" placeholder="seed (blank = new)" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running || !valid?.runnable.suite} />
+              <button onClick={() => void run("suite")} disabled={!canRun || !valid?.runnable.suite}>Run {config.suite_defaults.trials}-trial suite</button>
+            </div>
+            {valid && !valid.runnable.suite && <span className="muted small">Unavailable: {valid.runnable.suite_reason}.</span>}
+          </fieldset>
+        </Advanced>
+        <EvidenceLink />
+      </div>
       <Details>
-        <PreviewCard data={current} validating={validating} nominalMu={config.nominal_mu} />
-        <p className="muted small">Single: {config.semantics.single}. Suite: {config.semantics.suite}.</p>
         {status && status.status === "done" && status.result && (
           <ScenarioResultCard status={status} ghost={ghost} setGhost={setGhost} onReplay={onReplay} replaying={replaying} />
         )}
-        {status && running && <p className="muted">Executing {status.run_id}… {status.completed ?? 0}/{status.total ?? 1}</p>}
+        <Evidence title="Validated preview" summary="server validation and compiled-model facts" open={!status?.result}>
+          <PreviewCard data={current} validating={validating} nominalMu={config.nominal_mu} />
+          <p className="muted small">Single: {config.semantics.single}. Suite: {config.semantics.suite}.</p>
+        </Evidence>
 
         {config.runs.length > 0 && (
           <details className="card">
@@ -589,4 +586,20 @@ function ResultLine({ status, ghost, onReplay, replaying }: { status: ScenarioSt
       {att && <div><strong>Pushed: {att.physical_falls} falls / {att.valid_trials} valid trials</strong> ({pct(att.fall_rate)}); matched baseline {r.aggregates?.nominal.physical_falls} falls. Trials and replays below (ghost: {ghost}).</div>}
     </div>
   );
+}
+
+function shortExample(text: string): string {
+  const words = text.split(/\s+/);
+  return words.length <= 4 ? text : `${words.slice(0, 4).join(" ")}…`;
+}
+
+function describeDoc(doc: ScenarioDoc, nominalMu: number): string {
+  const parts = [doc.environment.ground_friction_mu === null ? `trained floor μ ${nominalMu}` : `floor μ ${doc.environment.ground_friction_mu}`];
+  parts.push(doc.payload.mass_kg > 0 ? `${doc.payload.mass_kg} kg payload` : "no payload");
+  if (doc.push) {
+    const dir = DIRECTIONS.find((d) => d.deg === doc.push!.direction_deg)?.label ?? `${doc.push.direction_deg}°`;
+    parts.push(`${doc.push.force_n} N ${dir} at ${doc.push.start_s} s for ${doc.push.duration_s} s`);
+  } else parts.push("no shove");
+  parts.push(`${doc.horizon_s} s at vx ${doc.command[0]}`);
+  return parts.join(" · ");
 }

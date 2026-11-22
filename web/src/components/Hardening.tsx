@@ -14,7 +14,8 @@ import {
   type HistoryEntry,
   type SetSummary,
 } from "../api";
-import { Details, Panel } from "./Workspace";
+import { PALETTE } from "../theme";
+import { Advanced, Details, Evidence, EvidenceLink, ModeIntro, useJobReport } from "./Workspace";
 
 interface Props {
   info: HardeningInfo;
@@ -60,7 +61,7 @@ export function Hardening({ info, show, onRefresh, replaying }: Props) {
 
   const replay = useCallback(
     (key: string, record: CandidateRecord, ep: string, g: Ghost) =>
-      show(`hardening/${key}/${ep}/${g}`, `Policy Hardening · ${ep} · candidate ${record.candidate_id} vs ${g === "baseline" ? "frozen baseline" : "matched no-shove baseline"}`,
+      show(`hardening/${key}/${ep}/${g}`, `Hardening · ${ep} · candidate ${record.candidate_id.slice(5, 13)} vs ${g === "baseline" ? "frozen baseline" : "no-shove baseline"}`,
         () => hardeningApi.replay(key, ep, g)),
     [show],
   );
@@ -145,97 +146,102 @@ export function Hardening({ info, show, onRefresh, replaying }: Props) {
   const epInfo = replayable.find((e) => e.id === episode);
   const replayKey = current ? `hardening/${current.key}/${episode}/${ghost}` : "";
 
+  useJobReport(running, `CPU hardening${last ? ` · generation ${last.generation}/${runGenerations}` : ` · ${status?.stage ?? "queued"}`}`);
+  const totalNominalFell = (m?: typeof tr) => (m?.baseline_summary.nominal_fell ?? 0);
   return (
     <>
-      <Panel eyebrow="Policy Hardening · M6 · CPU reflex search" title="Harden the frozen controller with a bounded reflex">
-        <p className="small">
-          The pretrained Go1 policy stays frozen. A bounded 10-parameter reflex corrects its joint targets when tilt, roll/pitch rate
-          or sideways velocity leave a calibrated nominal envelope; seeded CMA-ES tunes it on the server CPU. Not PPO, not fine-tuning.
-        </p>
-        <div className="status-pill">Candidate — pending regression evaluation (M7)</div>
-        {rec && current && (
-          <div className="card inset">
-            <label className="field wide">episode
-              <select value={episode} onChange={(e) => setEpisode(e.target.value)}>
-                {(["train", "validation_preview"] as const).map((split) => (
-                  <optgroup key={split} label={split === "train" ? "training" : "validation preview (not used for tuning)"}>
-                    {replayable.filter((e) => e.split === split).map((e) => {
-                      const r = rows.find((x) => x.id === e.id);
-                      return <option key={e.id} value={e.id}>{e.id}{r ? ` · ${CHANGE_TEXT[r.change] ?? r.change}` : ""}</option>;
-                    })}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-            <div className="row wrap">
-              <label className="radio small"><input type="radio" checked={ghost === "baseline"} onChange={() => setGhost("baseline")} /> ghost: frozen baseline, same shove</label>
-              <label className="radio small"><input type="radio" checked={ghost === "matched"} onChange={() => setGhost("matched")} disabled={!epInfo?.push} /> ghost: matched, no shove</label>
-            </div>
-            <button className="primary big wide" onClick={() => void replay(current.key, rec, episode, ghost)} disabled={replaying !== null}>
-              {replaying === replayKey ? "Re-simulating both controllers…" : "▶ Replay Baseline vs. Candidate"}
-              <span className="small">identical shove, reset, model and command; re-simulated on the server</span>
-            </button>
-            {row && <EpisodeCompare row={row} />}
+      <div className="mode">
+        <ModeIntro eyebrow="Harden controller · CPU reflex search" title="Tune a bounded reflex around the frozen policy">
+          <p>The pretrained policy stays unchanged. Seeded CMA-ES tunes a 10-parameter reflex on the server CPU against recorded shove failures and nominal walking. Not PPO, not fine-tuning.</p>
+        </ModeIntro>
+        <div><span className="status-pill">Candidate · pending M7 regression evaluation</span></div>
+        <div className="group">
+          <label className="group-label" htmlFor="harden-focus">Failures to harden against</label>
+          <select id="harden-focus" value={focus} onChange={(e) => setFocus(e.target.value)} disabled={running}>
+            <option value="">All {selectable.length} recorded training failures (+ variants, nominal walks)</option>
+            {selectable.map((e) => (
+              <option key={e.id} value={e.id}>{e.id} · {e.push ? `${e.push.force_n} N at ${e.push.direction_deg.toFixed(0)}°, ${e.push.start_s.toFixed(3)} s` : ""}</option>
+            ))}
+          </select>
+        </div>
+        <div className="cta">
+          <button className="primary big wide" onClick={start} disabled={running}>
+            {running ? `Hardening on the server… ${status?.stage ?? "queued"}` : "Harden controller"}
+          </button>
+          <div className="inline-status">
+            {running && (
+              <>
+                <div className="progress"><div style={{ width: `${(100 * (last?.generation ?? 0)) / runGenerations}%` }} /></div>
+                <div className="row wrap">
+                  <span>
+                    CPU optimization: <strong>{status?.stage}</strong>
+                    {last && <> · generation {last.generation}/{runGenerations} · {last.rollouts} rollouts · best J {fmt(last.best_objective, 3)} vs baseline {fmt(last.baseline_objective, 3)} · {last.best_attack_survived}/{last.attacks} attacks survived · {fmt(last.elapsed_s, 1)} s</>}
+                  </span>
+                  <button onClick={cancel} disabled={status?.cancel_requested}>{status?.cancel_requested ? "Cancelling…" : "Cancel run"}</button>
+                </div>
+              </>
+            )}
+            {error && <span className="error">{error}</span>}
+            {status?.status === "failed" && <span className="error">Hardening failed: {status.error}</span>}
+            {!running && !error && <span>Population {info.defaults.popsize} on {info.defaults.workers} CPU workers, {info.limits.wall_clock_s} s cap. The result is a candidate, never a promoted policy.</span>}
           </div>
-        )}
-        <div className="card inset">
-          <label className="field wide">train on
-            <select value={focus} onChange={(e) => setFocus(e.target.value)} disabled={running}>
-              <option value="">all {selectable.length} confirmed training failures (+ variants, nominal)</option>
-              {selectable.map((e) => (
-                <option key={e.id} value={e.id}>{e.id} · {e.push ? `${e.push.force_n} N @ ${e.push.direction_deg.toFixed(0)}°, ${e.push.start_s.toFixed(3)} s` : ""}</option>
-              ))}
-            </select>
-          </label>
-          <div className="row wrap">
-            <label className="field">generations <input type="number" min={info.limits.max_generations[0]} max={info.limits.max_generations[1]} value={generations} onChange={(e) => setGenerations(Number(e.target.value))} disabled={running} /></label>
-            <label className="field">seed <input placeholder="random" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running} /></label>
-          </div>
-          <div className="row">
-            <button className="primary big" onClick={start} disabled={running}>{running ? `Running: ${status?.stage ?? "queued"}…` : "▶ Harden Controller"}</button>
-            {running && <button onClick={cancel} disabled={status?.cancel_requested}>{status?.cancel_requested ? "Cancelling…" : "Cancel"}</button>}
-          </div>
-          <p className="muted small">Population {info.defaults.popsize}, {info.defaults.workers} CPU workers, {info.limits.wall_clock_s} s wall-clock cap; native MuJoCo on the server.</p>
-          {running && (
-            <>
-              <div className="progress"><div style={{ width: `${(100 * (last?.generation ?? 0)) / runGenerations}%` }} /></div>
-              <p className="small">
-                CPU optimization progress: stage <strong>{status?.stage}</strong>
-                {last && <> · generation {last.generation}/{runGenerations} · {last.rollouts} rollouts · best J {fmt(last.best_objective, 3)} (baseline {fmt(last.baseline_objective, 3)}) · attacks survived {last.best_attack_survived}/{last.attacks} · {fmt(last.elapsed_s, 1)} s</>}
-              </p>
-            </>
-          )}
-          {error && <p className="error">{error}</p>}
-          {status?.status === "failed" && <p className="error">Hardening failed: {status.error}</p>}
         </div>
 
         {rec && current && (
-          <div className="card inset">
+          <div className="summary-box">
             <div className="row wrap">
-              <span className={`badge ${current.origin === "precomputed" ? "pre" : "live"}`}>
-                {current.origin === "precomputed" ? "Precomputed sample candidate" : `Executed now · ${current.key}`}
-              </span>
-              <strong className="small">{rec.candidate_id}</strong>
+              <span className={`badge ${current.origin === "precomputed" ? "pre" : "live"}`}>{current.origin === "precomputed" ? "Precomputed sample candidate" : `Executed now · ${current.key}`}</span>
+              <span className="xsmall muted">{rec.candidate_id}</span>
             </div>
-            <table className="small compare">
+            <table className="compare">
               <thead><tr><th /><th>Frozen baseline</th><th>Candidate</th></tr></thead>
               <tbody>
                 <tr><td>training attacks survived</td><td>{surv(tr?.baseline_summary)}</td><td><strong>{surv(tr?.candidate_summary)}</strong></td></tr>
                 <tr><td>validation-preview attacks</td><td>{surv(va?.baseline_summary)}</td><td><strong>{surv(va?.candidate_summary)}</strong></td></tr>
-                <tr><td>nominal falls (train + val)</td><td>{(tr?.baseline_summary.nominal_fell ?? 0) + (va?.baseline_summary.nominal_fell ?? 0)}</td>
+                <tr><td>nominal falls</td><td>{totalNominalFell(tr) + totalNominalFell(va)}</td>
                   <td className={(tr?.candidate_summary?.nominal_fell ?? 0) + (va?.candidate_summary?.nominal_fell ?? 0) ? "bad" : ""}>{(tr?.candidate_summary?.nominal_fell ?? 0) + (va?.candidate_summary?.nominal_fell ?? 0)}</td></tr>
-                <tr><td>training objective J</td><td>{fmt(rec.objective.baseline_training, 3)}</td><td>{fmt(rec.objective.candidate_training, 3)}</td></tr>
               </tbody>
             </table>
-            <p className="muted small">
-              Stop: {rec.result.stop_reason} after {rec.result.generations_completed} generations · {rec.accounting.total_rollouts} rollouts · {fmt(rec.timing.wall_s, 1)} s on {rec.timing.workers} workers.
-              {!rec.result.improved_training_objective && " No parameter vector beat the baseline on training; the frozen baseline is preserved."}
-            </p>
+            {!rec.result.improved_training_objective && <div className="small">No parameter vector beat the baseline on training; the frozen baseline is preserved.</div>}
           </div>
         )}
         {!rec && <p className="muted small">No candidate yet. Run a hardening job to create one.</p>}
 
-      </Panel>
+        {rec && current && (
+          <div className="group">
+            <label className="group-label" htmlFor="harden-episode">Compare on an episode</label>
+            <select id="harden-episode" value={episode} onChange={(e) => setEpisode(e.target.value)}>
+              {(["train", "validation_preview"] as const).map((split) => (
+                <optgroup key={split} label={split === "train" ? "training" : "validation preview (not used for tuning)"}>
+                  {replayable.filter((e) => e.split === split).map((e) => {
+                    const r = rows.find((x) => x.id === e.id);
+                    return <option key={e.id} value={e.id}>{e.id}{r ? ` · ${CHANGE_TEXT[r.change] ?? r.change}` : ""}</option>;
+                  })}
+                </optgroup>
+              ))}
+            </select>
+            <div className="row wrap">
+              <div className="segmented" role="group" aria-label="Ghost robot">
+                <button aria-pressed={ghost === "baseline"} onClick={() => setGhost("baseline")}>Ghost: baseline, same shove</button>
+                <button aria-pressed={ghost === "matched"} onClick={() => setGhost("matched")} disabled={!epInfo?.push}>Ghost: no shove</button>
+              </div>
+              <button onClick={() => void replay(current.key, rec, episode, ghost)} disabled={replaying !== null}>
+                {replaying === replayKey ? "Re-simulating…" : "Replay baseline vs candidate"}
+              </button>
+            </div>
+            {row && <EpisodeCompare row={row} />}
+          </div>
+        )}
+
+        <Advanced summary="Advanced · generations and seed">
+          <div className="row wrap">
+            <label className="field">generations <input type="number" min={info.limits.max_generations[0]} max={info.limits.max_generations[1]} value={generations} onChange={(e) => setGenerations(Number(e.target.value))} disabled={running} /></label>
+            <label className="field">seed <input placeholder="random" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running} /></label>
+          </div>
+          <span className="xsmall muted">Generations {info.limits.max_generations[0]}–{info.limits.max_generations[1]}; the server caps every run at {info.limits.wall_clock_s} s and {info.limits.max_rollouts} rollouts.</span>
+        </Advanced>
+        <EvidenceLink />
+      </div>
       <Details>
         <HardeningDetails info={info} current={current} history={history} running={running} onOpen={poll} />
       </Details>
@@ -273,20 +279,21 @@ function HistoryPlot({ history, baseline }: { history: HistoryEntry[]; baseline?
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="search-svg" style={{ height: 180 }}>
       {[0, yMax / 2, yMax].map((v) => (
-        <g key={v}><line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} stroke="#e3e7ec" /><text x={pad.l - 6} y={y(v) + 4} fontSize={11} textAnchor="end" fill="#66707c">{v.toFixed(2)}</text></g>
+        <g key={v}><line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} stroke={PALETTE.border} /><text x={pad.l - 6} y={y(v) + 4} fontSize={11} textAnchor="end" fill={PALETTE.muted}>{v.toFixed(2)}</text></g>
       ))}
-      {base !== undefined && <line x1={pad.l} x2={W - pad.r} y1={y(base)} y2={y(base)} stroke="#d64545" strokeDasharray="4 4"><title>frozen baseline J</title></line>}
-      <polyline fill="none" stroke="#1f5fbf" strokeWidth={2} points={history.map((h) => `${x(h.generation)},${y(h.best_objective)}`).join(" ")} />
-      {history.map((h) => <circle key={`m${h.generation}`} cx={x(h.generation)} cy={y(h.generation_median)} r={3} fill="#9aa3ad"><title>{`generation ${h.generation} median ${h.generation_median.toFixed(3)}`}</title></circle>)}
-      <text x={W / 2} y={H - 6} fontSize={11} textAnchor="middle" fill="#66707c">generation (blue: best-so-far training J; grey: generation median; red dashed: frozen baseline)</text>
+      {base !== undefined && <line x1={pad.l} x2={W - pad.r} y1={y(base)} y2={y(base)} stroke={PALETTE.fell} strokeDasharray="4 4"><title>frozen baseline J</title></line>}
+      <polyline fill="none" stroke={PALETTE.candidate} strokeWidth={2} points={history.map((h) => `${x(h.generation)},${y(h.best_objective)}`).join(" ")} />
+      {history.map((h) => <circle key={`m${h.generation}`} cx={x(h.generation)} cy={y(h.generation_median)} r={3} fill={PALETTE.faint}><title>{`generation ${h.generation} median ${h.generation_median.toFixed(3)}`}</title></circle>)}
+      <text x={W / 2} y={H - 6} fontSize={11} textAnchor="middle" fill={PALETTE.muted}>generation (blue: best-so-far training J; grey: generation median; red dashed: frozen baseline)</text>
     </svg>
   );
 }
 
-function ComparisonTable({ title, rows }: { title: string; rows: ComparisonRow[] }) {
+function ComparisonTable({ title, rows, open }: { title: string; rows: ComparisonRow[]; open?: boolean }) {
+  const recovered = rows.filter((r) => r.change === "recovered").length;
+  const regressed = rows.filter((r) => r.change === "regressed").length;
   return (
-    <div className="card">
-      <h3>{title}</h3>
+    <Evidence title={title} summary={`${recovered} recovered · ${regressed} regressed · ${rows.length} episodes`} open={open}>
       <table className="cases">
         <thead><tr><th>Episode</th><th>Baseline</th><th>Candidate</th><th>Change</th><th>Tilt ° (b → c)</th><th>Progress m (b → c)</th><th>Reflex active</th><th>First activation</th></tr></thead>
         <tbody>
@@ -304,7 +311,7 @@ function ComparisonTable({ title, rows }: { title: string; rows: ComparisonRow[]
           ))}
         </tbody>
       </table>
-    </div>
+    </Evidence>
   );
 }
 
@@ -314,20 +321,18 @@ function HardeningDetails({ info, current, history, running, onOpen }: { info: H
   return (
     <>
       {history.length > 0 && (
-        <div className="card">
-          <h3>{running ? "CPU optimization progress (live)" : `Optimization history · ${rec?.candidate_id}`}</h3>
+        <Evidence title={running ? "CPU optimization progress (live)" : "Optimization history"} summary={running ? "updates every generation" : `${rec?.candidate_id} · ${history.length} generations`} open={running}>
           <HistoryPlot history={history} baseline={running ? undefined : rec?.objective.baseline_training} />
-        </div>
+        </Evidence>
       )}
       {rec && (
         <>
           <p className="finding small">{rec.result.statement} Training and validation-preview sets are reported separately; the locked M7 test set
             ({rec.sets.locked_test.episodes} episodes, sha {rec.sets.locked_test.sha256.slice(0, 12)}) was not evaluated.</p>
-          {rec.measurements.train.comparison && <ComparisonTable title="Training set (used for tuning)" rows={rec.measurements.train.comparison} />}
+          {rec.measurements.train.comparison && <ComparisonTable title="Training set (used for tuning)" rows={rec.measurements.train.comparison} open />}
           {rec.measurements.validation_preview.comparison && <ComparisonTable title="Validation preview (not used for tuning; distinct gait phases and attack configurations)" rows={rec.measurements.validation_preview.comparison} />}
           {grids && (
-            <div className="card">
-              <h3>Exploratory dense grids (precomputed; overlap training/validation timings, locked timings skipped; not a holdout)</h3>
+            <Evidence title="Exploratory dense grids (precomputed)" summary="overlap training/validation timings, locked timings skipped; not a holdout">
               <table>
                 <thead><tr><th>Grid</th><th>Tested</th><th>Baseline fell</th><th>Candidate fell</th><th>Regressions</th></tr></thead>
                 <tbody>
@@ -336,8 +341,9 @@ function HardeningDetails({ info, current, history, running, onOpen }: { info: H
                   ))}
                 </tbody>
               </table>
-            </div>
+            </Evidence>
           )}
+          <Evidence title="Reflex parameters and provenance" summary={`reproducibility ${rec.reproducibility_sha256.slice(0, 12)}`}>
           <div className="two-col">
             <div className="card">
               <h3>Reflex parameters</h3>
@@ -364,6 +370,7 @@ function HardeningDetails({ info, current, history, running, onOpen }: { info: H
               </dl>
             </div>
           </div>
+          </Evidence>
         </>
       )}
       <details className="card">
