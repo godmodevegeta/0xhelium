@@ -46,6 +46,8 @@ class ServerSettings:
     live_suite: Path
     web_dist: Path
     discovery_timeout_s: float = 120.0
+    hardening_wall_clock_s: float = 60.0
+    hardening_workers: int = 0  # 0 = automatic (cpu_count - 2, at most 8)
 
     @classmethod
     def from_env(cls) -> ServerSettings:
@@ -58,6 +60,8 @@ class ServerSettings:
             ),
             web_dist=Path(os.environ.get("ROBUSTLAB_WEB_DIST", root / "web" / "dist")),
             discovery_timeout_s=float(os.environ.get("ROBUSTLAB_DISCOVERY_TIMEOUT_S", "120")),
+            hardening_wall_clock_s=float(os.environ.get("ROBUSTLAB_HARDENING_WALL_S", "60")),
+            hardening_workers=int(os.environ.get("ROBUSTLAB_HARDENING_WORKERS", "0")),
         )
 
 
@@ -99,6 +103,13 @@ class ScenarioRunBody(BaseModel):
     method: Literal["stratified", "grid"] = "stratified"
     seed: int | None = Field(default=None, ge=0, lt=2**63)
     compile_id: str | None = Field(default=None, pattern=r"^cp-\d{8}T\d{6}Z-[0-9a-f]{8}$")
+
+
+class HardeningRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    seed: int | None = Field(default=None, ge=0, lt=2**63)
+    generations: int = Field(default=12, ge=1, le=30)
+    focus: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
 
 
 def create_app(settings: ServerSettings | None = None, compiler=None) -> FastAPI:
@@ -493,6 +504,69 @@ def create_app(settings: ServerSettings | None = None, compiler=None) -> FastAPI
         return await wait(
             jobs.replay(("scenario", run_id, trial, plan["ghost"]["kind"]), plan["compute"])
         )
+
+    # ------------------------------------------------------------------ policy hardening (M6)
+
+    from robustlab.adapt.harden import HardenConfigError, default_workers
+    from robustlab.api.hardening import PRESET_KEY, HardeningService
+
+    hardening = HardeningService(settings, jobs, settings.hardening_wall_clock_s,
+                                 settings.hardening_workers or default_workers())  # fmt: skip
+    app.state.hardening = hardening
+
+    @app.get("/api/hardening")
+    async def hardening_info():
+        return hardening.config()
+
+    @app.post("/api/hardening/runs", status_code=202)
+    async def start_hardening(body: HardeningRequest | None = None):
+        import secrets as _secrets
+
+        body = body or HardeningRequest()
+        seed_source = "supplied" if body.seed is not None else "drawn"
+        seed = body.seed if body.seed is not None else _secrets.randbelow(2**32)
+        try:
+            config = hardening.make_config(seed, body.generations, body.focus)
+            if body.focus is not None:
+                from robustlab.adapt.harden import training_episodes
+
+                training_episodes(hardening.sets, body.focus)
+            job = jobs.start_hardening(config, seed_source=seed_source,
+                                       wall_clock_s=settings.hardening_wall_clock_s)  # fmt: skip
+        except BusyError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except HardenConfigError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"run_id": job.run_id, "request": job.request, "status": job.status}
+
+    @app.get("/api/hardening/runs/{run_id}")
+    async def hardening_status(run_id: str):
+        status = jobs.hardening_status(run_id)
+        if status is None:
+            raise HTTPException(404, "unknown hardening run")
+        return status
+
+    @app.post("/api/hardening/runs/{run_id}/cancel", status_code=202)
+    async def cancel_hardening(run_id: str):
+        if jobs.hardening_status(run_id) is None:
+            raise HTTPException(404, "unknown hardening run")
+        if not jobs.cancel_hardening(run_id):
+            raise HTTPException(409, "run is not active")
+        return {"run_id": run_id, "cancel_requested": True}
+
+    @app.get("/api/hardening/runs/{run_id}/replay")
+    async def hardening_replay(
+        run_id: str, episode: str, ghost: Literal["baseline", "matched"] = "baseline"
+    ):
+        record = hardening.record_for(run_id) if (run_id == PRESET_KEY or
+                                                  jobs.hardening_path(run_id)) else None  # fmt: skip
+        if record is None:
+            raise HTTPException(404, "unknown or unfinished hardening run")
+        try:
+            compute = hardening.replay_compute(run_id, record, episode, ghost)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return await wait(jobs.replay(("hardening", run_id, episode, ghost), compute))
 
     if settings.web_dist.is_dir():
         app.mount("/", StaticFiles(directory=settings.web_dist, html=True), name="web")

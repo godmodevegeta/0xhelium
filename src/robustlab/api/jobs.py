@@ -27,6 +27,8 @@ from robustlab.experiments.trace import _atomic_write_json
 RUN_ID = re.compile(r"^ls-\d{8}T\d{6}Z-\d{1,20}$")
 DISCOVERY_ID = re.compile(r"^ds-\d{8}T\d{6}Z-(random|cmaes)-\d{1,20}$")
 SCENARIO_ID = re.compile(r"^sc-\d{8}T\d{6}Z-[0-9a-f]{8}$")
+HARDENING_ID = re.compile(r"^hd-\d{8}T\d{6}Z-\d{1,20}$")
+HARDENING_SUBDIR = "hardening"
 LIVE_SUBDIR = "live-stress"
 DISCOVERY_SUBDIR = "discovery"
 SCENARIO_SUBDIR = "scenarios"
@@ -102,6 +104,19 @@ class ScenarioJob:
     finished_utc: str | None = None
 
 
+@dataclass
+class HardeningJob:
+    run_id: str
+    request: dict
+    status: str = "queued"  # queued | running | done | failed
+    stage: str = "queued"
+    history: list = field(default_factory=list)
+    error: str | None = None
+    cancel: threading.Event = field(default_factory=threading.Event)
+    started_utc: str | None = None
+    finished_utc: str | None = None
+
+
 def _utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -128,6 +143,8 @@ class JobManager:
         self.discovery_timeout_s = discovery_timeout_s
         self.scenarios: dict[str, ScenarioJob] = {}
         self.scenario_dir = Path(runs_dir) / SCENARIO_SUBDIR
+        self.hardenings: dict[str, HardeningJob] = {}
+        self.hardening_dir = Path(runs_dir) / HARDENING_SUBDIR
         self._lock = threading.Lock()
         self._replay_cache: OrderedDict[tuple, dict] = OrderedDict()
 
@@ -138,6 +155,7 @@ class JobManager:
             any(j.status in active for j in self.jobs.values())
             or any(d.status in active for d in self.discoveries.values())
             or any(s.status in active for s in self.scenarios.values())
+            or any(h.status in active for h in self.hardenings.values())
         )
 
     # ------------------------------------------------------------------ live runs
@@ -560,6 +578,132 @@ class JobManager:
                 entry.update(status="done", physical_falls=att["physical_falls"],
                              valid_trials=att["valid_trials"],
                              numerical_failures=att["numerical_failures"])  # fmt: skip
+            out.append(entry)
+        return out
+
+    # ------------------------------------------------------------------ hardening (M6)
+
+    def start_hardening(self, config, *, seed_source: str, wall_clock_s: float) -> HardeningJob:
+        """Queue a bounded hardening run (`config` is a validated HardenConfig). The result is a
+        candidate record; nothing is promoted."""
+        from robustlab.adapt.harden import (
+            DEFAULT_CALIBRATION,
+            DEFAULT_SETS,
+            load_calibration,
+            run_hardening,
+            write_candidate,
+        )
+        from robustlab.adapt.sets import load_sets
+
+        with self._lock:
+            if self._busy():
+                raise BusyError("an experiment, discovery, scenario or hardening run is active")
+            run_id = f"hd-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{config.seed}"
+            while run_id in self.hardenings or (self.hardening_dir / run_id).exists():
+                time.sleep(1.0)
+                run_id = f"hd-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{config.seed}"
+            reproduce = (f"uv run robustlab harden --seed {config.seed} --generations "
+                         f"{config.max_generations} --popsize {config.popsize} --max-rollouts "
+                         f"{config.max_rollouts} --wall-clock {wall_clock_s:g}"
+                         + (f" --focus {config.focus}" if config.focus else "")
+                         + f" --out runs/m6/reproduce-{run_id}")  # fmt: skip
+            request = {"schema_version": 1, "run_id": run_id, "config": {
+                "seed": config.seed, "seed_source": seed_source, "popsize": config.popsize,
+                "max_generations": config.max_generations, "max_rollouts": config.max_rollouts,
+                "wall_clock_s": config.wall_clock_s, "workers": config.workers,
+                "focus": config.focus}, "requested_utc": _utc(), "reproduce": reproduce}  # fmt: skip
+            job = HardeningJob(run_id=run_id, request=request)
+            self.hardenings[run_id] = job
+        run_dir = self.hardening_dir / run_id
+        run_dir.mkdir(parents=True)
+        _atomic_write_json(run_dir / "request.json", request)
+
+        def work(worker: Worker) -> None:
+            job.status, job.started_utc = "running", _utc()
+            try:
+                stack = worker.stack("fall-contact")
+                sets = load_sets(self.root / DEFAULT_SETS, self.root)
+                calibration = load_calibration(self.root / DEFAULT_CALIBRATION,
+                                               stack.policy.sha256)  # fmt: skip
+
+                def stage(name: str) -> None:
+                    job.stage = name
+
+                record = run_hardening(stack, calibration, sets, config,
+                                       cancelled=job.cancel.is_set,
+                                       on_progress=job.history.append, on_stage=stage)  # fmt: skip
+                record["request"] = request
+                job.stage = "writing"
+                write_candidate(run_dir, record)
+                job.status, job.stage = "done", "finished"
+            except Exception as exc:  # noqa: BLE001 - reported to the client
+                job.status, job.error = "failed", f"{type(exc).__name__}: {exc}"
+                (run_dir / "error.txt").write_text(traceback.format_exc())
+            finally:
+                job.finished_utc = _utc()
+
+        self.experiments.submit(work)
+        return job
+
+    def hardening_path(self, run_id: str) -> Path | None:
+        if not HARDENING_ID.match(run_id):
+            return None
+        path = self.hardening_dir / run_id
+        return path if path.is_dir() else None
+
+    def hardening_record(self, run_id: str) -> dict | None:
+        path = self.hardening_path(run_id)
+        return None if path is None else _read_json(path / "candidate.json")
+
+    def hardening_status(self, run_id: str) -> dict | None:
+        path = self.hardening_path(run_id)
+        if path is None:
+            return None
+        job = self.hardenings.get(run_id)
+        request = (job.request if job else None) or _read_json(path / "request.json") or {}
+        status: dict[str, Any] = {"run_id": run_id, "request": request}
+        record = _read_json(path / "candidate.json")
+        if record is not None and (job is None or job.status == "done"):
+            status.update(status="done", stage="finished", record=record)
+        elif job is not None:
+            status.update(status=job.status, stage=job.stage, history=list(job.history),
+                          cancel_requested=job.cancel.is_set(), error=job.error)  # fmt: skip
+        else:
+            status.update(status="incomplete", error="no candidate.json (server restarted?)")
+        return status
+
+    def cancel_hardening(self, run_id: str) -> bool:
+        job = self.hardenings.get(run_id)
+        if job is None or job.status not in ("queued", "running"):
+            return False
+        job.cancel.set()
+        return True
+
+    def list_hardenings(self, limit: int = 20) -> list[dict]:
+        if not self.hardening_dir.is_dir():
+            return []
+        ids = sorted(
+            (p.name for p in self.hardening_dir.iterdir() if HARDENING_ID.match(p.name)),
+            reverse=True,
+        )
+        out = []
+        for run_id in ids[:limit]:
+            path = self.hardening_dir / run_id
+            request = _read_json(path / "request.json") or {}
+            entry = {"run_id": run_id, "requested_utc": request.get("requested_utc"),
+                     "seed": (request.get("config") or {}).get("seed"),
+                     "focus": (request.get("config") or {}).get("focus")}  # fmt: skip
+            record = _read_json(path / "candidate.json")
+            if record:
+                tr = record["measurements"]["train"]
+                va = record["measurements"]["validation_preview"]
+                entry.update(status="done", candidate_id=record["candidate_id"],
+                             stop_reason=record["result"]["stop_reason"],
+                             improved=record["result"]["improved_training_objective"],
+                             train=tr["candidate_summary"], validation=va["candidate_summary"])  # fmt: skip
+            else:
+                job = self.hardenings.get(run_id)
+                entry["status"] = job.status if job else "incomplete"
             out.append(entry)
         return out
 
