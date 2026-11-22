@@ -35,6 +35,8 @@ Replace the path with any local Python 3.12 interpreter. See `docs/kiro_build_lo
 uv run ruff check . && uv run ruff format --check .
 uv run pytest -q                  # fast unit and property tests
 uv run pytest -q -m integration   # native MuJoCo closed-loop tests
+uv run pytest -q -m smoke         # the Stop hook's ~4 s contract subset
+scripts/milestone_check.sh        # mandatory before a milestone review: all of the above + web build
 ```
 
 ## Run

@@ -247,3 +247,12 @@ Notes:
   server before the final runs.
 - **Documentation-sync hook.** `PostTaskExec` did not fire because `tasks.md` was edited directly.
   This section and the README were updated by hand under the hook's rules.
+
+M6.1 corrections after acceptance (`8f734b6`, branch `m6-ui-fixes`):
+
+| Item | Change | Observed verification |
+| --- | --- | --- |
+| Labels | Collision-free, clamped label placement | Playback scan of 126 frames × 3 replays × 2 sizes: 0 overlaps (old build: 5 overlaps, 21–114 frames outside the canvas) |
+| Mobile header | One-line header below 560 px | 40 px at 390×844 (check ≤ 64 px) |
+| Fullscreen | Headed-Chrome check | Real fullscreen entered and exited; first attempt refused while the window was unfocused |
+| Stop hook | Smoke subset (127 tests) and `scripts/milestone_check.sh` | Smoke 3.6–4.6 s; milestone check PASS at clean `8f734b6` |

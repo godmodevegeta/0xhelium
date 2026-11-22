@@ -1,6 +1,6 @@
 # M6.1 — Simulation-first UI rebuild
 
-Status: **implemented and checked locally; awaiting UI4 acceptance.** This is a UI-only change.
+Status: **accepted (UI4), with four corrections verified below.** This is a UI-only change.
 The backend is unchanged: physics, policy, optimizer, validation, jobs and endpoint contracts.
 `git diff m6-cpu-hardening -- src/ tests/` is empty.
 
@@ -231,3 +231,45 @@ uv run python scripts/ui_checks.py --nokey-base http://localhost:8001
   30 s limit.
 - **Previous-replay chip.** It is driven by jobs started in this browser tab; a job started
   elsewhere (CLI, another tab) shows only through the 409 busy response.
+
+## Accepted with corrections (branch `m6-ui-fixes`, `8f734b6`)
+
+1. **Robot labels never overlap.** Each label is anchored above its trunk and clamped inside the
+   canvas, below the HUD chips. When the two labels would touch, the ghost's label stacks above
+   the opaque robot's; if there is no room above, the pair moves down together.
+   - **Check:** a playback scan steps through every second frame (126 frames) of three replays at
+     1440×900 and 390×844, and reads both labels' rectangles at each step.
+   - **Before (old build):** labels overlapped on 5 frames and left the canvas on 21–114.
+   - **After:** 0 overlaps, 0 outside the canvas, 0 under HUD chips (`labels_*` in
+     `runs/m6ui/final/ui-checks.json`).
+2. **Compact mobile viewer header.** Below 560 px the "Opaque · Translucent" line is hidden,
+   because the in-scene labels name both robots. The title and source badge sit on one line, and
+   the badge is ellipsized; the full source stays in the summary strip and the badge tooltip.
+   - The header is 40 px tall at 390×844 (previously about 110 px), and a new check requires
+     ≤ 64 px.
+3. **Fullscreen in a real browser.** `scripts/fullscreen_check.py` opens a visible Chrome 157
+   window and clicks Fullscreen with a trusted mouse event.
+   - It verified that `document.fullscreenElement` is the stage card, with no fallback, and that
+     the canvas filled the width and grew taller.
+   - Orbit still changed the view in fullscreen, and the same button exited back to the original
+     layout.
+   - The first attempt was refused because the window was not focused. Bringing it to the front
+     fixed this, so the in-page expanded fallback is still needed for unfocused or embedded
+     contexts.
+   - Screenshot: `runs/m6ui/final/fullscreen-real-browser.png`.
+4. **Stop hook is a smoke subset.** It now runs `pytest -m 'smoke and not integration'`: 127 tests
+   from 13 contract modules, listed in `tests/conftest.py` (`SMOKE_MODULES`). It took 3.6–4.6 s over
+   three runs, against the 30 s limit.
+   - The complete suites are now the mandatory milestone check, `scripts/milestone_check.sh`:
+     ruff, smoke, all 265 fast tests, all 36 integration tests, and the web type-check and build.
+   - At clean `8f734b6` every step passed (`runs/m6ui/final/milestone_check.txt`).
+
+Also changed: the first column of the Harden summary table now takes 44%, so the
+"Frozen baseline / Candidate" header no longer wraps at 1440 px.
+
+Final runs at `8f734b6`:
+
+- `scripts/ui_checks.py`: 295 layout checks plus all flow, deep-link, no-key and label checks
+  passed.
+- `scripts/fullscreen_check.py`: all 6 checks passed.
+- `scripts/milestone_check.sh`: PASS.
