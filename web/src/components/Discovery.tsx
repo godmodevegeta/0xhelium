@@ -10,6 +10,7 @@ import {
   type PairedTrialRecord,
   type SearchCandidate,
 } from "../api";
+import { Details, Panel } from "./Workspace";
 
 interface Props {
   info: DiscoveryInfo;
@@ -41,6 +42,7 @@ export function Discovery({ info, onReplay, onRefresh, replaying }: Props) {
   const [status, setStatus] = useState<DiscoveryStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
+  const autoReplay = useRef<string | null>(null); // replay the result of a run started here
   const lim = info.limits;
 
   const poll = useCallback(
@@ -50,7 +52,10 @@ export function Discovery({ info, onReplay, onRefresh, replaying }: Props) {
           const s = await api.discoveryStatus(runId);
           setStatus(s);
           if (s.status === "queued" || s.status === "running") timer.current = window.setTimeout(tick, 250);
-          else onRefresh();
+          else {
+            onRefresh();
+            if (autoReplay.current === runId && s.record?.final) onReplay(runId, "final");
+          }
         } catch (e) {
           setError(String(e));
         }
@@ -82,6 +87,7 @@ export function Discovery({ info, onReplay, onRefresh, replaying }: Props) {
       return setError(`Shrink budget must be between ${lim.shrink_budget.min} and ${lim.shrink_budget.max}.`);
     try {
       const started = await api.startDiscovery({ algorithm, budget, seed, shrink_budget: shrinkBudget });
+      autoReplay.current = started.run_id;
       poll(started.run_id);
     } catch (e) {
       setError(String(e));
@@ -103,79 +109,88 @@ export function Discovery({ info, onReplay, onRefresh, replaying }: Props) {
   const candidateFails = evaluations.filter((e) => e.outcome === "fell");
   const bestCandidate = candidateFails.reduce<Evaluation | null>((b, e) => (b === null || e.candidate.impulse_ns < b.candidate.impulse_ns ? e : b), null);
 
+  const final = record?.final ?? null;
   return (
-    <section>
-      <div className="hero">
-        <div>
-          <div className="eyebrow">Failure Discovery · M4</div>
-          <h2>Search for a low-impulse shove that makes the robot fall</h2>
-          <p>
-            Four parameters: force 10–150 N, direction 0–360° in the robot's starting frame (0° forward, 90° left), start
-            2.000–3.020 s and duration 40–200 ms, both on the 4 ms physics step. Walking command, 5 s horizon, policy, start
-            state and scene are fixed. Every candidate is a real MuJoCo rollout on the server. The target is the lowest impulse
-            (force × duration) among <em>confirmed</em> falls found within the budget — not a global minimum.
-          </p>
-          <div className="row wrap">
-            {ALGORITHMS.map((a) => (
-              <label key={a.id} className="radio">
-                <input type="radio" name="alg" checked={algorithm === a.id} onChange={() => setAlgorithm(a.id)} disabled={running} /> {a.label}
-              </label>
-            ))}
-            <label className="field">budget <input type="number" min={lim.budget.min} max={lim.budget.max} step={lim.budget.multiple_of} value={budget} onChange={(e) => setBudget(Number(e.target.value))} disabled={running} /></label>
-            <label className="field">shrink <input type="number" min={lim.shrink_budget.min} max={lim.shrink_budget.max} value={shrinkBudget} onChange={(e) => setShrinkBudget(Number(e.target.value))} disabled={running} /></label>
-            <label className="field">seed <input placeholder="random" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running} /></label>
-          </div>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button className="primary big" onClick={start} disabled={running}>
-              {running ? `${status?.stage === "search" ? "Searching" : status?.stage ?? "Running"}… ${status?.completed ?? 0}/${runBudget}` : "▶ Discover Failure"}
-            </button>
-            {running && <button onClick={cancel} disabled={status?.cancel_requested}>{status?.cancel_requested ? "Cancelling…" : "Cancel"}</button>}
-          </div>
-          {running && <div className="progress"><div style={{ width: `${(100 * (status?.completed ?? 0)) / runBudget}%` }} /></div>}
-          {error && <p className="error">{error}</p>}
-          {status?.status === "failed" && <p className="error">Search failed: {status.error}</p>}
-          <p className="muted small">Server limit {lim.timeout_s} s per search; one expensive job at a time.</p>
+    <>
+      <Panel eyebrow="Failure Discovery · M4" title="Search for a low-impulse shove that makes the robot fall">
+        <p className="small">
+          Force 10–150 N, direction 0–360° in the starting frame (0° forward, 90° left), start 2.000–3.020 s, duration 40–200 ms.
+          Every candidate is a real MuJoCo rollout on the server. The target is the lowest impulse among <em>confirmed</em> falls
+          found within the budget, not a global minimum.
+        </p>
+        <div className="row wrap">
+          {ALGORITHMS.map((a) => (
+            <label key={a.id} className="radio">
+              <input type="radio" name="alg" checked={algorithm === a.id} onChange={() => setAlgorithm(a.id)} disabled={running} /> {a.label}
+            </label>
+          ))}
         </div>
+        <div className="row wrap">
+          <label className="field">budget <input type="number" min={lim.budget.min} max={lim.budget.max} step={lim.budget.multiple_of} value={budget} onChange={(e) => setBudget(Number(e.target.value))} disabled={running} /></label>
+          <label className="field">shrink <input type="number" min={lim.shrink_budget.min} max={lim.shrink_budget.max} value={shrinkBudget} onChange={(e) => setShrinkBudget(Number(e.target.value))} disabled={running} /></label>
+          <label className="field">seed <input placeholder="random" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running} /></label>
+        </div>
+        <div className="row">
+          <button className="primary big" onClick={start} disabled={running}>
+            {running ? `${status?.stage === "search" ? "Searching" : status?.stage ?? "Running"}… ${status?.completed ?? 0}/${runBudget}` : "▶ Discover Failure"}
+          </button>
+          {running && <button onClick={cancel} disabled={status?.cancel_requested}>{status?.cancel_requested ? "Cancelling…" : "Cancel"}</button>}
+        </div>
+        {running && <div className="progress"><div style={{ width: `${(100 * (status?.completed ?? 0)) / runBudget}%` }} /></div>}
+        {error && <p className="error">{error}</p>}
+        {status?.status === "failed" && <p className="error">Search failed: {status.error}</p>}
+        <p className="muted small">Server limit {lim.timeout_s} s per search; one expensive job at a time.</p>
+        {status && (
+          <div className="card inset small">
+            <strong>{record ? "Executed now" : "Executing"} · {status.request.algorithm === "cmaes" ? "CMA-ES" : "Random Search"} · seed {status.request.seed} · run {status.run_id}</strong>
+            <div>{evaluations.length} evaluations · {candidateFails.length} candidate falls
+              {!record && bestCandidate && <> · best so far {fmt(bestCandidate.candidate.impulse_ns, 2)} N·s <span className="muted">(not yet confirmed)</span></>}
+            </div>
+            {record && !record.search.found_failure && <div className="bad">No physical failure found in {record.accounting.search_rollouts} evaluations. Nothing is shown in its place.</div>}
+            {final && (
+              <>
+                <div>Final ({final.source}): <strong>{candidateText(final.candidate)}</strong> = {fmt(final.candidate.impulse_ns, 2)} N·s</div>
+                <button className="primary" onClick={() => onReplay(status.run_id, "final")} disabled={replaying !== null}>
+                  {replaying === `discovery/${status.run_id}/final` ? "Simulating…" : "▶ Replay Discovered Failure"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </Panel>
+      <Details>
+        {status && (
+          <div className="card">
+            <div className="sweep-head">
+              <strong>
+                {record ? "Executed now" : "Executing"} · {status.request.algorithm === "cmaes" ? "CMA-ES" : "Random Search"} · seed {status.request.seed} ({status.request.seed_source}) · run {status.run_id}
+              </strong>
+              {record && <span className="badge live">new simulations · commit {record.provenance.git.commit.slice(0, 7)} · {fmt(record.wall_s, 1)} s</span>}
+            </div>
+            <SearchPlot evaluations={evaluations} budget={runBudget} record={record ?? null} />
+            {record && <Result record={record} onReplay={(which) => onReplay(status.run_id, which)} replaying={replaying} runId={status.run_id} />}
+          </div>
+        )}
         <ComparisonCard info={info} />
-      </div>
-
-      {status && (
-        <div className="card">
-          <div className="sweep-head">
-            <strong>
-              {record ? "Executed now" : "Executing"} · {status.request.algorithm === "cmaes" ? "CMA-ES" : "Random Search"} · seed {status.request.seed} ({status.request.seed_source}) · run {status.run_id}
-            </strong>
-            {record && <span className="badge live">new simulations · commit {record.provenance.git.commit.slice(0, 7)} · {fmt(record.wall_s, 1)} s</span>}
-          </div>
-          <SearchPlot evaluations={evaluations} budget={runBudget} record={record ?? null} />
-          {!record && (
-            <p className="result-line">
-              {evaluations.length} evaluations · {candidateFails.length} candidate falls
-              {bestCandidate && <> · best candidate so far {fmt(bestCandidate.candidate.impulse_ns, 2)} N·s <span className="muted">(not yet confirmed)</span></>}
-            </p>
-          )}
-          {record && <Result record={record} onReplay={(which) => onReplay(status.run_id, which)} replaying={replaying} runId={status.run_id} />}
-        </div>
-      )}
-
-      {info.runs.length > 0 && (
-        <details className="card">
-          <summary>Previous discovery runs ({info.runs.length})</summary>
-          <table>
-            <thead><tr><th>Run</th><th>Algorithm</th><th>Budget</th><th>Seed</th><th>Result</th><th /></tr></thead>
-            <tbody>
-              {info.runs.map((r) => (
-                <tr key={r.run_id}>
-                  <td>{r.run_id}</td><td>{r.algorithm}</td><td>{r.budget}</td><td>{r.seed}</td>
-                  <td>{r.status !== "done" ? r.status : r.found_failure ? `${fmt(r.final_impulse_ns, 2)} N·s (${r.final_source})` : `no failure (${r.stop_reason})`}</td>
-                  <td>{r.status === "done" && <button onClick={() => poll(r.run_id)} disabled={running}>Open</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
-      )}
-    </section>
+        {info.runs.length > 0 && (
+          <details className="card">
+            <summary>Previous discovery runs ({info.runs.length})</summary>
+            <table>
+              <thead><tr><th>Run</th><th>Algorithm</th><th>Budget</th><th>Seed</th><th>Result</th><th /></tr></thead>
+              <tbody>
+                {info.runs.map((r) => (
+                  <tr key={r.run_id}>
+                    <td>{r.run_id}</td><td>{r.algorithm}</td><td>{r.budget}</td><td>{r.seed}</td>
+                    <td>{r.status !== "done" ? r.status : r.found_failure ? `${fmt(r.final_impulse_ns, 2)} N·s (${r.final_source})` : `no failure (${r.stop_reason})`}</td>
+                    <td>{r.status === "done" && <button onClick={() => poll(r.run_id)} disabled={running}>Open</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+      </Details>
+    </>
   );
 }
 

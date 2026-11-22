@@ -18,6 +18,7 @@ import {
   type ScenarioStatus,
   type ValidateResponse,
 } from "../api";
+import { Details, Panel } from "./Workspace";
 
 type Ghost = "primary" | "matched" | "original";
 
@@ -55,6 +56,7 @@ export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Pro
   const [ghost, setGhost] = useState<"matched" | "original">("matched");
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
+  const autoReplay = useRef<string | null>(null); // replay the result of a run started here
   const key = JSON.stringify(doc);
   const compiler = config.compiler;
 
@@ -123,7 +125,18 @@ export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Pro
           const s = await api.scenarioStatus(runId);
           setStatus(s);
           if (s.status === "queued" || s.status === "running") timer.current = window.setTimeout(tick, 300);
-          else onRefresh();
+          else {
+            onRefresh();
+            if (autoReplay.current === runId && s.status === "done" && s.result) {
+              autoReplay.current = null;
+              const name = s.result.scenario.name;
+              if (s.result.mode === "single") onReplay(runId, 0, "primary", `Scenario ${name} vs ${s.result.primary_baseline === "matched" ? "matched baseline" : "original nominal"}`);
+              else {
+                const t = s.summary?.trials.find((x) => x.outcome === "fell") ?? s.summary?.trials[0];
+                if (t) onReplay(runId, t.trial, "matched", `Scenario ${name} · trial ${t.trial} · push at ${t.start_s.toFixed(3)} s`);
+              }
+            }
+          }
         } catch (e) {
           setError(String(e));
         }
@@ -149,6 +162,7 @@ export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Pro
       });
       setStatus({ run_id: started.run_id, status: "queued", request: started.request, completed: 0, total: mode === "suite" ? config.suite_defaults.trials : 1 });
       setGhost("matched");
+      autoReplay.current = started.run_id;
       poll(started.run_id);
     } catch (e) {
       setError(String(e));
@@ -162,24 +176,33 @@ export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Pro
   const mu = doc.environment.ground_friction_mu;
   const push = doc.push;
 
+  const result = status?.status === "done" ? status.result : undefined;
   return (
-    <section>
-      <div className="hero">
-        <div>
-          <div className="eyebrow">Scenario Designer · friction × payload × push</div>
-          <h2>Compose a physical condition, check it, then simulate it</h2>
-          <p>
-            Change the floor friction, weld a payload box to the trunk, and optionally add a timed shove. The server validates every
-            value against fixed bounds (out-of-range values are rejected, never clamped), compiles the MuJoCo model and reports the
-            friction MuJoCo actually resolves at the feet before anything runs. Optional: describe the condition in words and let
-            an OpenRouter model propose the values, which go through the same validator.
-          </p>
+    <>
+      <Panel eyebrow="Scenario Designer · friction × payload × push" title="Compose a physical condition, check it, then simulate it">
+        <p className="small">
+          Floor friction, a payload box welded to the trunk and an optional timed shove. The server validates every value (out-of-range
+          values are rejected, never clamped) and reports the friction MuJoCo resolves at the feet before anything runs.
+        </p>
+        <div className="card inset action">
+          <ValidationLine data={current} validating={validating} />
+          <div className="row wrap">
+            <button className="primary" onClick={() => void run("single")} disabled={!canRun}>▶ Run single paired trial</button>
+            <button className="primary" onClick={() => void run("suite")} disabled={!canRun || !valid?.runnable.suite}>▶ Run {config.suite_defaults.trials}-trial suite</button>
+            <input className="seed" placeholder="suite seed (blank = new)" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running || !valid?.runnable.suite} />
+          </div>
+          {valid && !valid.runnable.suite && <p className="muted small">Suite unavailable: {valid.runnable.suite_reason}.</p>}
+          {running && (
+            <>
+              <div className="progress"><div style={{ width: `${(100 * (status?.completed ?? 0)) / (status?.total ?? 1)}%` }} /></div>
+              <p className="muted small">Executing {status?.run_id}… {status?.completed ?? 0}/{status?.total ?? 1}</p>
+            </>
+          )}
+          {error && <p className="error">{error}</p>}
+          {status?.status === "failed" && <p className="error">Run failed: {status.error}</p>}
+          {status && result && <ResultLine status={status} ghost={ghost} onReplay={onReplay} replaying={replaying} />}
         </div>
-      </div>
-
-      <div className="designer-grid">
-        <div>
-          <div className="card">
+          <div className="card inset">
             <div className="sweep-head">
               <h3>Describe it (optional)</h3>
               {compiler.configured ? (
@@ -215,7 +238,7 @@ export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Pro
             {compiled && <CompileResult result={compiled} />}
           </div>
 
-          <div className="card">
+          <div className="card inset">
             <div className="sweep-head">
               <h3>Parameters</h3>
               <div className="examples">
@@ -289,53 +312,34 @@ export function ScenarioDesigner({ config, onReplay, onRefresh, replaying }: Pro
               </div>
             </fieldset>
           </div>
-        </div>
+      </Panel>
+      <Details>
+        <PreviewCard data={current} validating={validating} nominalMu={config.nominal_mu} />
+        <p className="muted small">Single: {config.semantics.single}. Suite: {config.semantics.suite}.</p>
+        {status && status.status === "done" && status.result && (
+          <ScenarioResultCard status={status} ghost={ghost} setGhost={setGhost} onReplay={onReplay} replaying={replaying} />
+        )}
+        {status && running && <p className="muted">Executing {status.run_id}… {status.completed ?? 0}/{status.total ?? 1}</p>}
 
-        <div>
-          <PreviewCard data={current} validating={validating} nominalMu={config.nominal_mu} />
-          <div className="card">
-            <h3>Run on the server</h3>
-            <div className="row wrap">
-              <button className="primary" onClick={() => void run("single")} disabled={!canRun}>▶ Run single paired trial</button>
-              <button className="primary" onClick={() => void run("suite")} disabled={!canRun || !valid?.runnable.suite}>▶ Run {config.suite_defaults.trials}-trial suite</button>
-              <input className="seed" style={{ width: 200 }} placeholder="suite seed (blank = new)" value={seedText} onChange={(e) => setSeedText(e.target.value)} disabled={running || !valid?.runnable.suite} />
-            </div>
-            <p className="muted small">
-              Single: {config.semantics.single}. Suite: {config.semantics.suite}.
-              {valid && !valid.runnable.suite && <> <strong>Suite unavailable:</strong> {valid.runnable.suite_reason}.</>}
-            </p>
-            {running && (
-              <div className="progress"><div style={{ width: `${(100 * (status?.completed ?? 0)) / (status?.total ?? 1)}%` }} /></div>
-            )}
-            {error && <p className="error">{error}</p>}
-            {status?.status === "failed" && <p className="error">Run failed: {status.error}</p>}
-          </div>
-        </div>
-      </div>
-
-      {status && status.status === "done" && status.result && (
-        <ScenarioResultCard status={status} ghost={ghost} setGhost={setGhost} onReplay={onReplay} replaying={replaying} />
-      )}
-      {status && running && <p className="muted">Executing {status.run_id}… {status.completed ?? 0}/{status.total ?? 1}</p>}
-
-      {config.runs.length > 0 && (
-        <details className="card">
-          <summary>Previous scenario runs ({config.runs.length})</summary>
-          <table>
-            <thead><tr><th>Run</th><th>Name</th><th>Mode</th><th>Origin</th><th>Result</th><th /></tr></thead>
-            <tbody>
-              {config.runs.map((r) => (
-                <tr key={r.run_id}>
-                  <td>{r.run_id}</td><td>{r.name}</td><td>{r.mode}</td><td>{r.origin}</td>
-                  <td>{r.status !== "done" ? r.status : r.mode === "single" ? `${r.outcome}${r.reason ? ` (${r.reason})` : ""}` : `${r.physical_falls}/${r.valid_trials} fell${r.numerical_failures ? ` (+${r.numerical_failures} numerical)` : ""}`}</td>
-                  <td>{r.status === "done" && <button onClick={() => poll(r.run_id)} disabled={running}>Open</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
-      )}
-    </section>
+        {config.runs.length > 0 && (
+          <details className="card">
+            <summary>Previous scenario runs ({config.runs.length})</summary>
+            <table>
+              <thead><tr><th>Run</th><th>Name</th><th>Mode</th><th>Origin</th><th>Result</th><th /></tr></thead>
+              <tbody>
+                {config.runs.map((r) => (
+                  <tr key={r.run_id}>
+                    <td>{r.run_id}</td><td>{r.name}</td><td>{r.mode}</td><td>{r.origin}</td>
+                    <td>{r.status !== "done" ? r.status : r.mode === "single" ? `${r.outcome}${r.reason ? ` (${r.reason})` : ""}` : `${r.physical_falls}/${r.valid_trials} fell${r.numerical_failures ? ` (+${r.numerical_failures} numerical)` : ""}`}</td>
+                    <td>{r.status === "done" && <button onClick={() => poll(r.run_id)} disabled={running}>Open</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+      </Details>
+    </>
   );
 }
 
@@ -537,6 +541,52 @@ function ScenarioResultCard({ status, ghost, setGhost, onReplay, replaying }: {
       </div>
       <p className="muted small">An estimate over the stated push-timing distribution only; click a trial to replay it.</p>
       {originLine}
+    </div>
+  );
+}
+
+function ValidationLine({ data, validating }: { data: ValidateResponse | null; validating: boolean }) {
+  if (!data) return <p className="small muted">Validating on the server…</p>;
+  if (!data.valid) {
+    return (
+      <div className="small">
+        <span className="badge warn">invalid{validating ? " · rechecking…" : ""}</span> Nothing can run until every field validates.
+        <Errors errors={data.errors} />
+      </div>
+    );
+  }
+  const f = data.friction;
+  return (
+    <div className="small">
+      <span className="badge ok">valid · {data.scenario_sha256.slice(0, 8)}{validating ? " · rechecking…" : ""}</span>{" "}
+      {data.changed_from_original.length ? `changed: ${data.changed_from_original.map((c) => c.parameter).join(", ")}` : "trained nominal conditions"} · floor μ
+      observed at reset {f.observed_at_reset.sliding_mu_values.join(", ") || "—"} · total mass {fmt(data.mass.total_mass_kg, 2)} kg
+      {data.adjustments.length > 0 && <> · {data.adjustments.length} adjustment(s): {data.adjustments.map((a) => `${a.field} → ${JSON.stringify(a.applied)}`).join(", ")}</>}
+      <span className="muted"> · full preview below</span>
+    </div>
+  );
+}
+
+function ResultLine({ status, ghost, onReplay, replaying }: { status: ScenarioStatus; ghost: "matched" | "original"; onReplay: Props["onReplay"]; replaying: string | null }) {
+  const r = status.result!;
+  if (r.mode === "single" && r.cases) {
+    const c = r.cases;
+    return (
+      <div className="small result-box">
+        <div><span className="dot" style={{ background: COLORS[c.scenario.outcome] }} /> <strong>Scenario:</strong> {outcomeText(c.scenario)}, progress {fmt(c.scenario.forward_progress_m, 2)} m</div>
+        {c.matched && <div><span className="dot" style={{ background: COLORS[c.matched.outcome] }} /> Matched baseline: {outcomeText(c.matched)}, {fmt(c.matched.forward_progress_m, 2)} m</div>}
+        <div><span className="dot" style={{ background: COLORS[c.original.outcome] }} /> Original nominal: {outcomeText(c.original)}, {fmt(c.original.forward_progress_m, 2)} m</div>
+        <div className="row wrap">
+          {c.matched && <button onClick={() => onReplay(status.run_id, 0, "matched", `Scenario ${r.scenario.name} vs matched baseline`)} disabled={replaying !== null}>Replay vs matched</button>}
+          <button onClick={() => onReplay(status.run_id, 0, "original", `Scenario ${r.scenario.name} vs original nominal`)} disabled={replaying !== null}>Replay vs original</button>
+        </div>
+      </div>
+    );
+  }
+  const att = r.aggregates?.attacked;
+  return (
+    <div className="small result-box">
+      {att && <div><strong>Pushed: {att.physical_falls} falls / {att.valid_trials} valid trials</strong> ({pct(att.fall_rate)}); matched baseline {r.aggregates?.nominal.physical_falls} falls. Trials and replays below (ghost: {ghost}).</div>}
     </div>
   );
 }
