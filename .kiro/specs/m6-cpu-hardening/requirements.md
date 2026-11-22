@@ -41,7 +41,8 @@ fraction, first activation time, per-joint peak residual and the affected joints
 2.1 THE system SHALL compute a per-signal centre and half-width from nominal episodes of the base
 policy over several commands and non-adversarial M5 conditions, and store it with a hash.
 2.2 THE activation SHALL be `smoothstep(clip((m − (1 + margin)) / (0.25 + width), 0, 1))` with
-`m = max_i |f_i − c_i| / e_i`; it SHALL be 0 on every calibration tick for any margin ≥ 0.
+`m = max_i |f_i − c_i| / e_i` (c = median, e = largest deviation from it); it SHALL be 0 on every
+calibration tick for any margin ≥ 0.
 2.3 THE system SHALL measure nominal walking with the candidate rather than assume the dead-zone
 keeps it unchanged.
 

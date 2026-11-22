@@ -3,9 +3,9 @@
 A CPU-first simulation robustness prototype for legged robots. Milestone M0 runs an existing
 pretrained Go1 walking policy in native MuJoCo and records a trajectory with a run manifest.
 
-Status: M0–M4 approved; M5 (friction and payload scenarios, OpenRouter Scenario Designer)
+Status: M0–M5 approved; M6 (CPU reflex hardening candidates, simulation-first workspace)
 implemented locally, awaiting review, not deployed. Every command below was run, and its observed
-output is in `docs/milestones/M0.md` to `M5.md`.
+output is in `docs/milestones/M0.md` to `M6.md`.
 The pretrained policy (`go1-walk-s0` from [weeble](https://github.com/mottopanikeiku/weeble)) passed
 the fixed walking criteria: a 10 s forward run at 0.944 m/s mean over 2–10 s, and a zero-command run
 that stayed within 0.016 m. A 100 N shove toward its right for 0.1 s, started at each of the 256
@@ -90,7 +90,7 @@ uv sync --extra server
 uv run robustlab serve                           # http://127.0.0.1:8000
 ```
 
-Two presets: **Hidden Phase Vulnerability** shows the precomputed M2 sweep (11/256 falls at
+Two presets (tabs **Hidden Phase** and **Stress Test** since M6): **Hidden Phase Vulnerability** shows the precomputed M2 sweep (11/256 falls at
 100 N) and re-simulates any timing for a 3D replay. **Live Stress Test** runs real 16-trial
 experiments at 150 N on request and replays each trial. The browser only plays back poses computed
 by MuJoCo on the server.
@@ -123,6 +123,28 @@ runs and replays scenarios. With `OPENROUTER_API_KEY` set on the server (optiona
 `OPENROUTER_MODEL`, default `openai/gpt-4o-mini`), it can also turn a description into proposed
 values, which go through the same validator. Without a key everything else still works.
 
+M6 candidate hardening: a bounded 10-parameter residual reflex around the frozen policy, tuned by
+seeded CMA-ES on CPU MuJoCo (not PPO, not network fine-tuning). The result is a candidate record;
+nothing is promoted until the M7 regression gate.
+
+```bash
+uv run robustlab harden --seed 0 --out runs/m6/seed0            # about 20 s on 8 processes
+uv run robustlab harden --seed 0 --focus m2-100N-500 --out runs/m6/focus
+uv run python scripts/hardening_grids.py runs/m6/seed0/candidate.json   # exploratory grids
+```
+
+`harden` writes an immutable `candidate.json`. It contains the base-policy hash, the reflex
+parameters, the calibration, the training/validation-preview sets (the locked M7 set is never
+evaluated), the optimizer settings and seed, rollout counts, timings, the stop reason, and baseline
+vs candidate measurements per episode. Options: `--generations`, `--popsize`, `--max-rollouts`,
+`--wall-clock`, `--workers` (default: CPU count minus 2, at most 8), `--focus`.
+
+The web app puts the controls on the left and the 3D replay on the right in every mode, with
+detailed reports below. It opens on a labelled sample replay. Its **Policy Hardening** mode runs
+the same job, shows CPU optimization progress, and replays the frozen baseline and the candidate
+on identical shoves. `uv run python scripts/ui_checks.py` checks the layout at 1440×900, 1280×800
+and 390×844 against a running server, and runs the main flows.
+
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and
 `manifest.json` into the `--out` directory. It refuses to replace an existing run unless
 `--overwrite` is given. Commands are body-frame `vx,vy,yaw` (m/s, m/s, rad/s) within the policy's
@@ -149,6 +171,9 @@ committed; `scripts/fetch_assets.py` re-downloads them from the pinned weeble co
 - `.kiro/specs/m5-openrouter-scenarios/` — M5 requirements, design and tasks
 - `docs/milestones/M5.md` — M5 evidence: friction and payload measurements, OpenRouter prompt
   results, Scenario Designer runs
+- `.kiro/specs/m6-cpu-hardening/` — M6 requirements, design and tasks
+- `docs/milestones/M6.md` — M6 evidence: reflex design, calibration, data sets, five-seed results,
+  grids, timings, UI checks and screenshots
 - `docs/decision-log/` — architecture decision records
 
 ## License

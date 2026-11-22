@@ -17,6 +17,9 @@ All metrics are defined up to the first fall, so stopping early does not change 
 
 ## Residual reflex
 
+Calibration: centre = per-signal median, half-width = largest |sample − median| over every Tick
+of 11 base-policy episodes without pushes (8 commands; μ 0.45 and 1.0; a 2.5 kg payload).
+
 Signals (raw actor observation values, offsets from `policy.fields`):
 `f = (gravity_x, gravity_y, gyro_x, gyro_y, linvel_y − command_vy)`. Deviations `d = f − c`.
 
@@ -57,9 +60,9 @@ Per attack episode (fall time and tilt measured after the push starts, up to the
 - numerical failure: 4
 - fall: `2 − min(Δt_fall / 1.5 s, 1)` ∈ [1, 2]
 - survived: `0.5·min(max_tilt / 45°, 1)` ∈ [0, 0.5]
-- plus `0.5·max(0, 1 − progress/progress_ref)` and `0.2·mean|r|/0.30`
+- plus `0.5·clip(1 − progress/progress_ref, 0, 1)` and `0.2·mean|r|/0.30`
 
-Per nominal episode: numerical 4, fall 3, else `2·max(0, 1 − progress/progress_ref) +
+Per nominal episode: numerical 4, fall 3, else `2·clip(1 − progress/progress_ref, 0, 1) +
 1·activation_fraction + 0.5·mean|r|/0.30`. `progress_ref` is the base policy's no-push progress
 for the same command and model. `J = mean(attack) + mean(nominal)`.
 

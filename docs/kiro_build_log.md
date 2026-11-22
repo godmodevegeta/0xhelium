@@ -192,3 +192,32 @@ with `--no-ff` (`26ef65a`, not pushed). Branch `m5-openrouter-scenarios`. Measur
 | 3.1 | OpenRouter compiler, prompt, mocked tests, real smoke | `2bb0ed5`, `9b0d5b6` | 22 mocked tests; prompt v1 clamped silently (dropped); v2 had four frame errors in 10 prompts; v3: 7 valid, 3 explicit rejections, frame errors fixed |
 | 3.2–3.4 | `/api/scenarios/*`, Scenario Designer tab, replay payload box / floor tint / ghost label, CDP screenshot tool | `9b0d5b6` | 19 API tests; browser runs reproduce at clean commit (equal digests); screenshots in `runs/m5/screens/` |
 | 4 | Validation, docs | final M5 commit | 216 fast (Stop hook 12.4 s) + 27 integration; typecheck and build pass |
+
+## M6 — CPU controller hardening and simulation-first workspace
+
+Spec: `.kiro/specs/m6-cpu-hardening/`. Tag `m5-baseline` = `dd68ed6`; merged into `main` with
+`--no-ff` (`9f2839e`, not pushed). Branch `m6-cpu-hardening`. Measured results are in
+`docs/milestones/M6.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| 1 | Spec; probes of action/ctrl bounds, joint axes, kinematic signs, nominal signal ranges, shove timing | `e2b95b7` | `default_pose ± 0.5` inside every ctrlrange; hip +0.1 rad moves the foot +0.027 m in y |
+| 2.1–2.5 | `adapt/reflex.py`, `sets.py`, `evaluate.py`, `harden.py`; runner reset/stop-on-fall hooks; calibration and sets files; `robustlab harden`; tests | `27a3dcd`, `fdfa469`, `d13bf19` | 253 fast tests; 7 reflex integration tests (zero residual bit-identical; 17/17 confirmed failures fall under the baseline) |
+| 2.6 | Feasibility: seeds 0–4, 1 vs 8 workers, focus run, exploratory grids | runs at `fdfa469`, `63aacd7` | 18–21 s per default run on 8 processes; training attacks 14–15/16 (baseline 4/16); validation 8–9/9 (baseline 0/9); seed 4 had one validation nominal fall; 150 N grid 63 → 36 falls (seed 0) |
+| 3.1–3.2 | Hardening jobs on the JobManager, API, replay with verification, sample preset, API tests | `63aacd7`, `61408e1` | 12 API tests (2 integration); seed-0 candidate reproduced at `af859b4` (same reproducibility hash) |
+| 3.3–3.4 | Workspace refactor, shared persistent viewer, Policy Hardening mode, CDP UI checks | `af859b4` | `scripts/ui_checks.py`: canvas fully above the fold at 1440×900, 1280×800 and 390×844, no overflow, one canvas across all modes, scenario/discovery/hardening flows auto-replay |
+| 4 | Validation, docs | final M6 commit | 265 fast (Stop hook 23.7 s of 30 s) + 36 integration; typecheck and build pass |
+
+Notes:
+
+- **Bug fixed:** the first calibration used range midpoints. A start-up transient put the roll-rate
+  centre at −0.71 rad/s, which would have biased the gain terms. The calibration now uses the
+  median and the largest deviation from it.
+- **Process-pool pitfall:** spawn-started workers re-import the main module, so scripts that call
+  the pool need an `if __name__ == "__main__"` guard.
+- **Stale server:** a server left over from M5 kept port 8000 open and answered `/api/hardening`
+  with 404 until I stopped it.
+- **Screenshot review fixes:** the camera was moved closer; the hardening replay controls were moved
+  above the fold; progress now uses the run's own generation cap; timeline markers are clipped.
+- **Documentation-sync hook:** `PostTaskExec` did not fire because `tasks.md` was edited directly.
+  This section and the README were updated by hand under the hook's rules.
