@@ -261,8 +261,12 @@ def test_candidate_record_contents_and_immutability(fake, stack, calibration, se
     assert record["base_policy"]["sha256"] == stack.policy.sha256
     assert record["sets"]["sha256"] == sets.sha256 and "locked_test" in record["sets"]
     train = record["measurements"]["train"]
-    assert train["changes"]["attack"].get("recovered", 0) + train["changes"]["attack"].get(
-        "both_fell", 0) + train["changes"]["attack"].get("both_survived", 0) == 16
+    assert (
+        train["changes"]["attack"].get("recovered", 0)
+        + train["changes"]["attack"].get("both_fell", 0)
+        + train["changes"]["attack"].get("both_survived", 0)
+        == 16
+    )
     path = write_candidate(tmp_path, record)
     assert load_candidate(path)["candidate_id"] == record["candidate_id"]
     with pytest.raises(FileExistsError):
