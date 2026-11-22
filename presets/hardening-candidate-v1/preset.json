@@ -1,0 +1,17 @@
+{
+  "id": "hardening-candidate",
+  "version": 1,
+  "title": "Sample hardening candidate (seed 0)",
+  "files": {
+    "candidate.json": "1a1bf2724df8807dfa125bdcbca7b7b480aac4e96300e2b89c84d34bbcd42780",
+    "grids.json": "ea5655e5d2e77fcc6c01987529f9c99375bc26bc3aa2300bca57975c6d70cffc"
+  },
+  "source": {
+    "command": "uv run robustlab harden --seed 0 --out runs/m6/seed0",
+    "candidate_git_commit": "fdfa4698c434b91e21a5d044c4264fc91f6f6c2d",
+    "grids_command": "uv run python scripts/hardening_grids.py runs/m6/seed0/candidate.json",
+    "grids_git_commit": "63aacd7464793e0d95337bc42460b2da950f75e1",
+    "milestone": "M6",
+    "status": "candidate, pending the M7 regression gate"
+  }
+}

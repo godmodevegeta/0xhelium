@@ -145,6 +145,7 @@ export interface ReplayCase {
 export interface Verification {
   all_match: boolean;
   recorded_commit: string;
+  what?: string;
   cases: Record<string, { digest_match: boolean; outcome_match: boolean; recorded_outcome: string; resimulated_outcome: string }>;
 }
 
@@ -176,8 +177,12 @@ export interface Replay {
   trial?: number;
   start_substep?: number;
   which?: "final" | "search";
-  // M5 scenario replays
-  mode?: "single" | "suite";
+  // M5 scenario replays; M6 hardening replays use mode "hardening"
+  mode?: "single" | "suite" | "hardening";
+  reflex?: { activation: number[]; max_abs_residual: number[]; affected_joints: string[]; first_activation_s: number | null; activation_fraction: number };
+  candidate_id?: string;
+  candidate_status?: string;
+  episode?: HardeningEpisode;
   ghost?: GhostInfo;
   labels?: { attacked: string; nominal: string };
   environment?: { mu: number; ghost_mu: number; nominal_mu: number };
@@ -595,3 +600,146 @@ export function fmt(value: number | null | undefined, digits = 3): string {
 export function pct(value: number | null | undefined): string {
   return value === null || value === undefined ? "—" : `${(100 * value).toFixed(1)}%`;
 }
+
+// ---------------------------------------------------------------- M6 policy hardening
+
+export interface HardeningEpisode {
+  id: string;
+  kind: "attack" | "nominal";
+  split: "train" | "validation_preview";
+  source: string;
+  command: [number, number, number];
+  ground_friction_mu: number | null;
+  payload_kg: number;
+  push: { force_n: number; direction_deg: number; start_s: number; duration_s: number; start_substep: number; duration_substeps: number } | null;
+  confirmed_failure: boolean;
+  tags: string[];
+  gait_phase_substep: number | null;
+  selectable?: boolean;
+}
+
+export interface EpisodeBrief {
+  outcome: Outcome;
+  reason: string | null;
+  fall_time_s: number | null;
+  time_after_push_s: number | null;
+  max_tilt_after_push_deg: number | null;
+  progress_m: number;
+  reflex?: { activation_fraction: number; first_activation_s: number | null; mean_abs_residual: number; max_abs_residual: number; affected_joints: string[] };
+}
+
+export interface ComparisonRow {
+  id: string;
+  kind: "attack" | "nominal";
+  change: string;
+  baseline: EpisodeBrief;
+  candidate: EpisodeBrief;
+}
+
+export interface SetSummary {
+  attacks: number;
+  attack_survived: number;
+  attack_fell: number;
+  attack_numerical: number;
+  nominal: number;
+  nominal_survived: number;
+  nominal_fell: number;
+  nominal_numerical: number;
+  mean_attack_tilt_deg: number | null;
+}
+
+export interface SplitMeasurement {
+  baseline_summary: SetSummary;
+  candidate_summary: SetSummary | null;
+  comparison?: ComparisonRow[];
+  changes?: Record<string, Record<string, number>>;
+  confirmed_failures?: { ids: string[]; changes: Record<string, Record<string, number>> };
+}
+
+export interface HistoryEntry {
+  generation: number;
+  rollouts: number;
+  best_objective: number;
+  generation_best: number;
+  generation_median: number;
+  best_attack_survived: number;
+  best_nominal_fell: number;
+  elapsed_s: number;
+  baseline_objective?: number;
+  attacks?: number;
+}
+
+export interface CandidateRecord {
+  candidate_id: string;
+  status: string;
+  regression_gate: string;
+  base_policy: { sha256: string; path: string };
+  reflex: { parameters: Record<string, number>; vector: number[]; schema: { parameters: { name: string; lo: number; hi: number; unit: string; doc: string }[] } };
+  calibration: { sha256: string };
+  sets: { name: string; sha256: string; training_ids: string[]; locked_test: { episodes: number; sha256: string; status: string } };
+  optimizer: { config: { seed: number; popsize: number; max_generations: number; max_rollouts: number; workers: number; focus: string | null; wall_clock_s: number } };
+  objective: { baseline_training: number; candidate_training: number | null };
+  result: { stop_reason: string; generations_completed: number; improved_training_objective: boolean; best_generation: number | null; statement: string };
+  accounting: { reference_rollouts: number; baseline_rollouts: number; optimization_rollouts: number; validation_preview_rollouts: number; total_rollouts: number };
+  timing: { wall_s: number; optimization_wall_s: number; workers: number };
+  history: HistoryEntry[];
+  measurements: { train: SplitMeasurement; validation_preview: SplitMeasurement };
+  provenance: { git: { commit: string; dirty: boolean | null } };
+  reproducibility_sha256: string;
+  request?: { reproduce: string };
+}
+
+export interface GridSummary {
+  force_n: number;
+  tested: number;
+  skipped_locked: number[];
+  baseline_fell: number;
+  candidate_fell: number;
+  numerical: number;
+  transitions: Record<string, number>;
+  regressions: number[];
+}
+
+export interface HardeningRunEntry {
+  run_id: string;
+  seed: number;
+  focus: string | null;
+  status: string;
+  requested_utc: string;
+  candidate_id?: string;
+  stop_reason?: string;
+  improved?: boolean;
+  train?: SetSummary;
+  validation?: SetSummary;
+}
+
+export interface HardeningInfo {
+  sets: { name: string; sha256: string; gait_period_s: number; locked_test: { episodes: number; sha256: string; status: string }; notes: string[] };
+  episodes: HardeningEpisode[];
+  defaults: { max_generations: number; popsize: number; max_rollouts: number; wall_clock_s: number; workers: number };
+  limits: { max_generations: [number, number]; max_rollouts: number; wall_clock_s: number };
+  preset: { key: string; result_origin: string; meta: { title: string; source: Record<string, string> }; record: CandidateRecord; grids: { grids: Record<string, GridSummary>; git: { commit: string } } } | null;
+  runs: HardeningRunEntry[];
+  semantics: string;
+}
+
+export interface HardeningStatus {
+  run_id: string;
+  status: "queued" | "running" | "done" | "failed" | "incomplete";
+  stage: string;
+  request: { config: { seed: number; seed_source: string; max_generations: number; focus: string | null; workers: number; wall_clock_s: number }; reproduce: string };
+  history?: HistoryEntry[];
+  cancel_requested?: boolean;
+  error?: string | null;
+  record?: CandidateRecord;
+}
+
+export const hardeningApi = {
+  info: () => request<HardeningInfo>("/api/hardening"),
+  start: (body: { seed?: number; generations: number; focus?: string }) =>
+    request<{ run_id: string; request: HardeningStatus["request"] }>("/api/hardening/runs", postJson(body)),
+  status: (runId: string) => request<HardeningStatus>(`/api/hardening/runs/${encodeURIComponent(runId)}`),
+  cancel: (runId: string) => request<{ cancel_requested: boolean }>(`/api/hardening/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }),
+  replay: (key: string, episode: string, ghost: "baseline" | "matched") =>
+    request<Replay>(`/api/hardening/runs/${encodeURIComponent(key)}/replay?episode=${encodeURIComponent(episode)}&ghost=${ghost}`),
+};

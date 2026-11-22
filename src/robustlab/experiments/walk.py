@@ -44,6 +44,9 @@ class EpisodeConfig:
     seconds: float
     seed: int = 0
     push: PushScenario | None = None
+    # M6: end the episode after the Tick in which the first physical fall is detected. Metrics are
+    # defined up to the first fall, so they are unchanged; the trajectory is shorter.
+    stop_on_fall: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,7 +90,7 @@ class EpisodeRecord:
     nonfoot_contact: np.ndarray | None = None  # [T] bool, any non-foot floor contact in the Tick
     push_impulse: np.ndarray | None = None  # [T, 3] world-frame impulse applied in the Tick, N*s
     fall: FallResult | None = None
-    truncated: bool = False  # stopped early after a numerical failure
+    truncated: bool = False  # stopped early: numerical failure, or a fall with stop_on_fall
     push: dict | None = None  # PushScenario.describe() for the episode
 
     @property
@@ -159,6 +162,9 @@ class EpisodeRunner:
         self.command[:] = command
         self.last_action[:] = 0
         self.obs_last_action[:] = 0
+        actor_reset = getattr(self.actor, "reset", None)  # stateful wrappers (M6 reflex)
+        if actor_reset is not None:
+            actor_reset()
         mujoco.mj_forward(model, data)
         self.substep = 0
         self.monitor.reset()
@@ -263,7 +269,9 @@ class EpisodeRunner:
             rec.warning_total[k] = self.warning_total()
             rec.nonfoot_contact[k] = self.tick_nonfoot
             rec.push_impulse[k] = self.tick_impulse
-            if self.monitor.numerical_failure:
+            if self.monitor.numerical_failure or (
+                config.stop_on_fall and self.monitor.physical_fall
+            ):
                 done = k + 1
                 break
         if done < n_ticks:

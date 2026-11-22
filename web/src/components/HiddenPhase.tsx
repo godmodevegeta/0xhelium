@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { COLORS, fmt, pct, type CompactTrial, type HiddenPhase as HiddenPhaseData } from "../api";
+import { Details, Panel } from "./Workspace";
 
 interface Props {
   data: HiddenPhaseData;
@@ -15,67 +16,70 @@ export function HiddenPhase({ data, onReplay, replaying }: Props) {
   const [low, high] = data.sampling.interval_s;
   const cfg = data.config;
 
+  const failing = data.trials.filter((t) => t.outcome === "fell");
   return (
-    <section>
-      <div className="hero">
-        <div>
-          <div className="eyebrow">Preset 1 · {data.preset.title}</div>
-          <h2>
-            {att.physical_falls} / {att.valid_trials} shove timings made the robot fall ({pct(att.fall_rate)})
-          </h2>
-          <p>
-            {cfg.attack.force_n} N toward the robot's right for {cfg.attack.duration_s} s while walking at {cfg.command[0]} m/s.
-            Every one of the {data.trials.length} start times on the 4 ms grid in [{low.toFixed(3)}, {high.toFixed(3)}) s was
-            simulated once: an exact failure frequency over that timing distribution, in this deterministic simulation.
-            Numerical failures: {att.numerical_failures}.
-          </p>
-          <span className="badge pre">
-            Precomputed · M2 exhaustive sweep · commit {data.provenance.git.commit.slice(0, 7)} · results {data.results_sha256.slice(0, 8)}
-          </span>
-        </div>
-        <button className="primary big" onClick={() => { setSelected(data.verified_failure_substep); onReplay(data.verified_failure_substep); }} disabled={replaying !== null}>
+    <>
+      <Panel eyebrow={`Preset 1 · ${data.preset.title}`} title={`${att.physical_falls} / ${att.valid_trials} shove timings made the robot fall (${pct(att.fall_rate)})`}>
+        <p className="small">
+          {cfg.attack.force_n} N toward the robot's right for {cfg.attack.duration_s} s while walking at {cfg.command[0]} m/s, started at each of
+          the {data.trials.length} 4 ms steps in [{low.toFixed(3)}, {high.toFixed(3)}) s. Exact frequency over that timing distribution in this
+          deterministic simulation; numerical failures {att.numerical_failures}.
+        </p>
+        <span className="badge pre">Precomputed · M2 sweep · commit {data.provenance.git.commit.slice(0, 7)}</span>
+        <button className="primary big wide" onClick={() => { setSelected(data.verified_failure_substep); onReplay(data.verified_failure_substep); }} disabled={replaying !== null}>
           {replaying === data.verified_failure_substep ? "Simulating…" : "▶ Replay a failure"}
           <span className="small">shove at {fmt(data.verified_failure_substep * 0.004)} s</span>
         </button>
-      </div>
-
-      <SweepChart trials={data.trials} selected={selected} onSelect={setSelected} />
-
-      {finding && (
-        <p className="finding">
-          All {att.physical_falls} falls happened while the front-right and rear-left feet were in stance (FR+RL diagonal), but only{" "}
-          <strong>{finding.fell} of the {finding.tested}</strong> FR+RL timings fell. Stance alone does not predict a fall; the
-          outcome changes between neighbouring 4 ms start times.
-        </p>
-      )}
-
-      <div className="two-col">
-        <div className="card">
+        <div className="small"><strong>All {failing.length} failing timings</strong> (click to replay):</div>
+        <div className="chips compact">
+          {failing.map((t) => (
+            <button key={t.start_substep} className="chip" style={{ background: COLORS.fell }} disabled={replaying !== null}
+              onClick={() => { setSelected(t.start_substep); onReplay(t.start_substep); }} title={`${t.stance} · fell ${fmt(t.fall_time_s)} s`}>
+              <span>{t.start_s.toFixed(3)} s</span>
+            </button>
+          ))}
+        </div>
+        <div className="card inset">
           <h3>Selected timing: {fmt(trial.start_s)} s</h3>
           <TrialFacts trial={trial} />
           <button onClick={() => onReplay(trial.start_substep)} disabled={replaying !== null}>
             {replaying === trial.start_substep ? "Simulating…" : "Replay this timing (re-simulate now)"}
           </button>
-          <p className="muted small">Recorded outcome is from the precomputed sweep. Replay re-runs this one paired trial on the server and checks it against the recorded trajectory digests.</p>
         </div>
-        <div className="card">
-          <h3>Outcome by stance at the shove</h3>
-          <table>
-            <thead><tr><th>Feet down</th><th>Tested</th><th>Fell</th></tr></thead>
-            <tbody>
-              {data.stance_table.map((r) => (
-                <tr key={r.stance}><td>{r.stance}</td><td>{r.tested}</td><td className={r.fell ? "bad" : ""}>{r.fell}</td></tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="muted small">Stance = foot-floor contact at the last 20 ms control tick before the shove, nominal run.</p>
+      </Panel>
+      <Details>
+        <SweepChart trials={data.trials} selected={selected} onSelect={setSelected} />
+        {finding && (
+          <p className="finding">
+            All {att.physical_falls} falls happened while the front-right and rear-left feet were in stance (FR+RL diagonal), but only{" "}
+            <strong>{finding.fell} of the {finding.tested}</strong> FR+RL timings fell. Stance alone does not predict a fall; the
+            outcome changes between neighbouring 4 ms start times.
+          </p>
+        )}
+        <div className="two-col">
+          <div className="card">
+            <h3>Outcome by stance at the shove</h3>
+            <table>
+              <thead><tr><th>Feet down</th><th>Tested</th><th>Fell</th></tr></thead>
+              <tbody>
+                {data.stance_table.map((r) => (
+                  <tr key={r.stance}><td>{r.stance}</td><td>{r.tested}</td><td className={r.fell ? "bad" : ""}>{r.fell}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="muted small">Stance = foot-floor contact at the last 20 ms control tick before the shove, nominal run.</p>
+          </div>
+          <div className="card">
+            <h3>About the replay</h3>
+            <p className="muted small">Recorded outcomes are from the precomputed sweep (results {data.results_sha256.slice(0, 8)}). A replay re-runs that paired trial on the server and checks it against the recorded trajectory digests.</p>
+          </div>
         </div>
-      </div>
-      <details className="card">
-        <summary>What this does and does not show</summary>
-        <ul>{data.interpretation.map((line) => <li key={line}>{line}</li>)}</ul>
-      </details>
-    </section>
+        <details className="card">
+          <summary>What this does and does not show</summary>
+          <ul>{data.interpretation.map((line) => <li key={line}>{line}</li>)}</ul>
+        </details>
+      </Details>
+    </>
   );
 }
 

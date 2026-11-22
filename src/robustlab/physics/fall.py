@@ -174,6 +174,10 @@ class FallMonitor:
     def numerical_failure(self) -> bool:
         return any(name in NUMERICAL_REASONS for name in self.events)
 
+    @property
+    def physical_fall(self) -> bool:
+        return any(name in PHYSICAL_REASONS for name in self.events)
+
     def _record(self, reason: str, state_index: int, detail: dict) -> None:
         if reason not in self.events:
             self.events[reason] = FallEvent(reason, state_index, state_index * self.sim_dt, detail)
