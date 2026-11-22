@@ -135,6 +135,11 @@ def _episode(doc: dict, split: str) -> EpisodeSpec:
     )  # fmt: skip
 
 
+def episode_from_dict(doc: dict, split: str) -> EpisodeSpec:
+    """Parse one episode document (used by the M7 gate, which may read the locked set)."""
+    return _episode(doc, split)
+
+
 def variants(
     base: EpisodeSpec, rule: dict, rng: np.random.Generator, count: int
 ) -> list[EpisodeSpec]:
