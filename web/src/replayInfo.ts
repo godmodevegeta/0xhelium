@@ -7,10 +7,12 @@ export interface RobotNames {
 }
 
 export function robotNames(r: Replay): RobotNames {
-  if (r.mode === "hardening") {
+  if (r.mode === "hardening" || r.mode === "gate") {
+    // "Promoted" only when the gate's registry version exists for this exact candidate id.
+    const promoted = r.gate_status?.status === "promoted" && r.gate_status.version;
     return {
-      main: "Candidate · frozen policy + reflex",
-      ghost: r.ghost?.kind === "matched" ? "Frozen baseline · no shove" : "Frozen baseline",
+      main: promoted ? `Promoted ${r.gate_status!.version!.split("-")[0]} · policy + reflex` : "Candidate · frozen policy + reflex",
+      ghost: r.ghost?.kind === "matched" ? "Frozen baseline v0 · no shove" : "Frozen baseline v0",
     };
   }
   if (r.mode === "single" || r.mode === "suite") {
@@ -49,4 +51,19 @@ export function directionWord(world: [number, number, number]): string {
   const deg = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
   const names = ["forward", "forward-left", "left", "back-left", "backward", "back-right", "right", "forward-right"];
   return `toward ${names[Math.round(deg / 45) % 8]} (${deg.toFixed(0)}°)`;
+}
+
+const n = (v: number) => v.toLocaleString("en-US");
+
+// What the server computed to produce this replay. Only measured counts; a replay loaded from a
+// saved run says so instead.
+export function computeText(r: Replay): string {
+  const c = r.compute;
+  if (!c || c.episodes === 0) return "Recorded by the server's MuJoCo run · replayed here";
+  return `Server MuJoCo: ${c.episodes} episodes · ${n(c.physics_steps)} physics steps · ${n(c.control_ticks)} policy steps · ${c.wall_s.toFixed(2)} s${c.cached ? " (cached)" : ""} · replayed here`;
+}
+
+export function evidenceText(r: Replay): string | null {
+  const e = r.evidence_compute;
+  return e ? `from the ${e.label}: ${n(e.rollouts)} rollouts, ${e.wall_s.toFixed(0)} s on ${e.workers} CPU workers` : null;
 }

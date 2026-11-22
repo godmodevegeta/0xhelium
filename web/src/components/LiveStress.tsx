@@ -84,7 +84,7 @@ export function LiveStress({ data, onReplay, onRefresh, replaying }: Props) {
     <>
       <div className="mode">
         <ModeIntro eyebrow="Stress test · verified preset" title={`${cfg.trials} randomly timed ${cfg.attack.force_n} N shoves`}>
-          <p>Each trial pairs a nominal walk with the same walk shoved toward the robot's right for {cfg.attack.duration_s} s; only the shove start varies.</p>
+          <p>Each trial pairs a nominal walk with the same walk shoved toward the robot's right for {cfg.attack.duration_s} s; only the shove start varies. Controller: frozen baseline v0.</p>
         </ModeIntro>
         <div className="summary-box">
           <div><span className="muted">Preset</span> <strong>{data.preset.title}</strong> v{data.preset.version} · {cfg.command[0]} m/s · start times stratified over [{cfg.attack.start.low_s.toFixed(3)}, {cfg.attack.start.high_s.toFixed(3)}) s</div>

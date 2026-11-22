@@ -1,0 +1,16 @@
+{
+  "id": "m7-gate",
+  "version": 1,
+  "title": "M7 regression gate v1 result",
+  "files": {
+    "gate_result.json": "fceedefd2e724c7628a38a1a888acf6986f43cbcc297e0f43d504677e5e53887",
+    "gate-run.log": "b0eb4c7e8927731844ca7a77f52f83d0c87dacb293f13bd92324e4969083a059"
+  },
+  "source": {
+    "command": "uv run robustlab gate",
+    "git_commit": "0202138f9c067935864ccb1bf8d9b599f2e50b70",
+    "gate_config_sha256": "d1ff4994fac7d9e3a9cedee1599a660bdbabaa152e742a2527b59542e3dfdcfe",
+    "results_sha256": "f3d26d3d3d204f96b2c702af84b2a54e5014ce6f2e99d5429c308a2173c104b3",
+    "note": "copy of runs/m7/gate-v1/gate_result.json (same content, compact JSON); evaluated once; robustlab gate --verify reproduced results_sha256 with 4 workers"
+  }
+}

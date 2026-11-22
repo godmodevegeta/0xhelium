@@ -117,7 +117,7 @@ export function Discovery({ info, onReplay, onRefresh, replaying }: Props) {
     <>
       <div className="mode">
         <ModeIntro eyebrow="Discover failure · bounded search" title="Find the weakest shove that still makes it fall">
-          <p>Every candidate shove (force, direction, start, duration) is a real MuJoCo rollout; the result is the lowest-impulse <em>confirmed</em> fall within the budget.</p>
+          <p>Every candidate shove (force, direction, start, duration) is a real MuJoCo rollout; the result is the lowest-impulse <em>confirmed</em> fall within the budget. Controller: frozen baseline v0.</p>
         </ModeIntro>
         <div className="group">
           <div className="group-label" id="alg-label">Search algorithm</div>

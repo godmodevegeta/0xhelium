@@ -20,9 +20,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import mujoco
+
 from robustlab.experiments.stack import Stack, load_stack
 from robustlab.experiments.suite import SuiteConfig, load_suite_config, read_report, run_suite
 from robustlab.experiments.trace import _atomic_write_json
+from robustlab.experiments.walk import work_done
 
 RUN_ID = re.compile(r"^ls-\d{8}T\d{6}Z-\d{1,20}$")
 DISCOVERY_ID = re.compile(r"^ds-\d{8}T\d{6}Z-(random|cmaes)-\d{1,20}$")
@@ -714,12 +717,22 @@ class JobManager:
         with self._lock:
             if key in self._replay_cache:
                 self._replay_cache.move_to_end(key)
+                cached = self._replay_cache[key]
                 done: Future = Future()
-                done.set_result(self._replay_cache[key])
+                done.set_result({**cached, "compute": {**cached["compute"], "cached": True}})
                 return done
 
         def run(worker: Worker) -> dict:
+            before = work_done()
+            started = time.perf_counter()
             result = compute(worker)
+            wall_s = time.perf_counter() - started
+            episodes, ticks, steps = (b - a for a, b in zip(before, work_done(), strict=True))
+            # Measured work for this replay: what the server simulated to produce it.
+            result["compute"] = {"episodes": episodes, "control_ticks": ticks,
+                                 "physics_steps": steps, "wall_s": round(wall_s, 3),
+                                 "engine": f"MuJoCo {mujoco.__version__}, native, CPU",
+                                 "cached": False}  # fmt: skip
             with self._lock:
                 self._replay_cache[key] = result
                 while len(self._replay_cache) > 32:

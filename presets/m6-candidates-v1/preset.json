@@ -1,0 +1,18 @@
+{
+  "id": "m6-candidates",
+  "version": 1,
+  "title": "M6 CLI hardening candidates, seeds 0-4",
+  "files": {
+    "seed0.json": "1a1bf2724df8807dfa125bdcbca7b7b480aac4e96300e2b89c84d34bbcd42780",
+    "seed1.json": "e9c49b84ce9d4614248d8542e319d67a1916094f592e9767a00182d150aa67d8",
+    "seed2.json": "d085f973ced7f4a91bae3651af63154fc06f4ebd34c33fce70def567e86af77e",
+    "seed3.json": "41785d47e443ee1b52073b276b550c2cdc667d298ea98e926c07144c7549ba76",
+    "seed4.json": "34236f566b9c98483c6d4a0843e0d065f2d1f08f85135c343bc0e8e86c2aa095"
+  },
+  "source": {
+    "command": "uv run robustlab harden --seed N --out runs/m6/seedN  (N = 0..4, defaults)",
+    "git_commit": "fdfa469",
+    "milestone": "M6",
+    "note": "copied unchanged from runs/m6/seedN/candidate.json; seed0 is identical to presets/hardening-candidate-v1/candidate.json"
+  }
+}

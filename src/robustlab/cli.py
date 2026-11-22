@@ -534,6 +534,75 @@ def _cmd_harden(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_gate(args: argparse.Namespace) -> int:
+    import json
+
+    root = Path(args.root).resolve()
+    from robustlab.adapt.harden import default_workers
+    from robustlab.assets import verify_assets
+    from robustlab.experiments.stack import load_stack
+    from robustlab.experiments.trace import _atomic_write_json
+    from robustlab.gate.config import GateConfigError, load_gate
+    from robustlab.gate.evaluate import assess, build_result, run_gate
+    from robustlab.gate.registry import apply_decision
+
+    issues = verify_assets(root)
+    if issues:
+        for issue in issues:
+            print(f"FAIL  {issue}", file=sys.stderr)
+        return EXIT_ASSETS
+    try:
+        gate = load_gate(root / args.config, root)
+    except (GateConfigError, OSError, KeyError) as exc:
+        print(f"gate: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    out = Path(args.out)
+    committed = root / "presets" / f"m7-{gate.name}" / "gate_result.json"
+    previous = [p for p in (out / "gate_result.json", committed) if p.exists()]
+    if previous and not args.verify:
+        print(f"gate: {gate.name} was already evaluated ({previous[0]}); a gate version is run once. "
+              "Use --verify to recompute and compare without a new decision.", file=sys.stderr)  # fmt: skip
+        return EXIT_WRITE
+    stack = load_stack(root, Path(gate.doc["base_policy"]["path"]), "fall-contact")
+    print(
+        f"gate             {gate.name} (config sha {gate.sha256[:12]}), primary {gate.primary_id}"
+    )
+    print(
+        f"suites           {gate.suite_ids() and {k: len(v) for k, v in gate.suite_ids().items()}}"
+    )
+    run = run_gate(stack, gate, workers=args.workers or default_workers(),
+                   on_progress=lambda m: print(f"evaluating       {m}", flush=True))  # fmt: skip
+    verdict = assess(gate, run["outcomes"])
+    result = build_result(stack, gate, run, verdict)
+    if args.verify:
+        reference = json.loads(previous[0].read_text()) if previous else None
+        same = reference is not None and reference["results_sha256"] == result["results_sha256"]
+        print(f"verify           results {result['results_sha256'][:16]} "
+              f"{'matches' if same else 'DIFFERS FROM'} {previous[0] if previous else 'nothing'}")  # fmt: skip
+        return 0 if same else 1
+    out.mkdir(parents=True, exist_ok=True)
+    _atomic_write_json(out / "gate_result.json", result)
+    for cid, c in verdict["candidates"].items():
+        crit = c["criteria"]
+        print(f"{cid}{' (primary)' if c['primary'] else ''}: "
+              + ", ".join(f"{k} {'PASS' if v['pass'] else 'FAIL'}" for k, v in crit.items())
+              + f" | holdout falls {crit['G2_holdout']['baseline']['fell']} -> {crit['G2_holdout']['candidate']['fell']}"
+              f"/{crit['G2_holdout']['candidate']['valid']} | gauntlet {crit['G3_regression']['baseline']['fell']} -> "
+              f"{crit['G3_regression']['candidate']['fell']}/{crit['G3_regression']['candidate']['valid']}, "
+              f"{len(crit['G3_regression']['regressed'])} regressions | nominal falls {crit['G1_nominal']['falls']}")  # fmt: skip
+    primary = next(c for c in gate.doc["candidates"] if c["candidate_id"] == gate.primary_id)
+    entry = apply_decision(root, gate.name, result["results_sha256"], verdict["decision"], primary,
+                           gate.doc["base_policy"]["path"], gate.doc["base_policy"]["sha256"])  # fmt: skip
+    print(f"decision         {verdict['decision']['statement']}")
+    print(f"registry         {entry.get('version', 'rejection recorded')}; active "
+          f"{json.loads((root / 'policies/registry/active.json').read_text())['active']}")  # fmt: skip
+    print(
+        f"rollouts         {run['rollouts']} in {run['wall_s']:.1f} s on {run['workers']} workers"
+    )
+    print(f"record           {out / 'gate_result.json'}")
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     import os
 
@@ -675,6 +744,16 @@ def build_parser() -> argparse.ArgumentParser:
     harden.add_argument("--policy", default="policies/go1-walk-s0.json")
     harden.add_argument("--root", default=".")
     harden.set_defaults(func=_cmd_harden)
+
+    gate = subparsers.add_parser(
+        "gate", help="run the pre-registered M7 regression gate once and apply its decision"
+    )
+    gate.add_argument("--config", default="examples/m7/gate-v1.json")
+    gate.add_argument("--out", default="runs/m7/gate-v1")
+    gate.add_argument("--workers", type=int, default=0, help="processes (0 = automatic)")
+    gate.add_argument("--verify", action="store_true", help="recompute and compare only")
+    gate.add_argument("--root", default=".")
+    gate.set_defaults(func=_cmd_gate)
 
     serve = subparsers.add_parser("serve", help="start the web app (needs the server extra)")
     serve.add_argument("--host", default="127.0.0.1")

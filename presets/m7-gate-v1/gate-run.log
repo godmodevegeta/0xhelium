@@ -1,0 +1,15 @@
+gate             gate-v1 (config sha d1ff4994fac7), primary cand-ea7b9dbc0bbd
+suites           {'holdout': 10, 'nominal': 13, 'gauntlet': 1280, 'known_failures': 34}
+evaluating       nominal walking
+evaluating       holdout
+evaluating       gauntlet
+evaluating       known_failures
+cand-ea7b9dbc0bbd (primary): G1_nominal PASS, G2_holdout PASS, G3_regression PASS, G4_numerical PASS | holdout falls 10 -> 3/10 | gauntlet 89 -> 59/1280, 16 regressions | nominal falls 0
+cand-1948a588a5e8: G1_nominal PASS, G2_holdout PASS, G3_regression PASS, G4_numerical PASS | holdout falls 10 -> 4/10 | gauntlet 89 -> 50/1280, 4 regressions | nominal falls 0
+cand-49b2dc217b49: G1_nominal FAIL, G2_holdout PASS, G3_regression PASS, G4_numerical PASS | holdout falls 10 -> 5/10 | gauntlet 89 -> 55/1280, 10 regressions | nominal falls 0
+cand-e5b1f34c8285: G1_nominal PASS, G2_holdout PASS, G3_regression PASS, G4_numerical PASS | holdout falls 10 -> 2/10 | gauntlet 89 -> 54/1280, 7 regressions | nominal falls 0
+cand-6b7733cc1cd2: G1_nominal FAIL, G2_holdout PASS, G3_regression FAIL, G4_numerical PASS | holdout falls 10 -> 4/10 | gauntlet 89 -> 302/1280, 259 regressions | nominal falls 2
+decision         cand-ea7b9dbc0bbd passed G1-G4 and is promoted.
+registry         v1-cand-ea7b9dbc0bbd; active v1-cand-ea7b9dbc0bbd
+rollouts         8022 in 102.0 s on 8 workers
+record           runs/m7/gate-v1/gate_result.json

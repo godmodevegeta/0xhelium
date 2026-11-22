@@ -159,7 +159,7 @@ export interface PayloadBoxFrames {
 }
 
 export interface GhostInfo {
-  kind: "matched" | "original";
+  kind: "matched" | "original" | "baseline";
   label: string;
   parameters: { ground_friction_mu: number; payload_kg: number; payload_offset_xyz_m: number[]; push: null };
 }
@@ -179,8 +179,15 @@ export interface Replay {
   trial?: number;
   start_substep?: number;
   which?: "final" | "search";
-  // M5 scenario replays; M6 hardening replays use mode "hardening"
-  mode?: "single" | "suite" | "hardening";
+  // M5 scenario replays; M6 hardening replays use mode "hardening", M7 gate replays "gate"
+  mode?: "single" | "suite" | "hardening" | "gate";
+  // Measured on the server for this replay (JobManager.replay)
+  compute?: { episodes: number; control_ticks: number; physics_steps: number; wall_s: number; engine: string; cached: boolean };
+  // The larger run this replay comes from (gate evaluation, candidate search)
+  evidence_compute?: { label: string; rollouts: number; wall_s: number; workers: number };
+  gate?: string;
+  suite?: "holdout" | "nominal" | "gauntlet" | "known_failures";
+  gate_status?: GateStatus | null;
   reflex?: { activation: number[]; max_abs_residual: number[]; affected_joints: string[]; first_activation_s: number | null; activation_fraction: number };
   candidate_id?: string;
   candidate_status?: string;
@@ -608,9 +615,10 @@ export function pct(value: number | null | undefined): string {
 export interface HardeningEpisode {
   id: string;
   kind: "attack" | "nominal";
-  split: "train" | "validation_preview";
+  split: "train" | "validation_preview" | string;
   source: string;
   command: [number, number, number];
+  horizon_s?: number;
   ground_friction_mu: number | null;
   payload_kg: number;
   push: { force_n: number; direction_deg: number; start_s: number; duration_s: number; start_substep: number; duration_substeps: number } | null;
@@ -713,6 +721,7 @@ export interface HardeningRunEntry {
   improved?: boolean;
   train?: SetSummary;
   validation?: SetSummary;
+  gate_status?: GateStatus | null;
 }
 
 export interface HardeningInfo {
@@ -720,7 +729,7 @@ export interface HardeningInfo {
   episodes: HardeningEpisode[];
   defaults: { max_generations: number; popsize: number; max_rollouts: number; wall_clock_s: number; workers: number };
   limits: { max_generations: [number, number]; max_rollouts: number; wall_clock_s: number };
-  preset: { key: string; result_origin: string; meta: { title: string; source: Record<string, string> }; record: CandidateRecord; grids: { grids: Record<string, GridSummary>; git: { commit: string } } } | null;
+  preset: { key: string; result_origin: string; meta: { title: string; source: Record<string, string> }; record: CandidateRecord; grids: { grids: Record<string, GridSummary>; git: { commit: string } }; gate_status?: GateStatus | null } | null;
   runs: HardeningRunEntry[];
   semantics: string;
 }
@@ -745,3 +754,138 @@ export const hardeningApi = {
   replay: (key: string, episode: string, ghost: "baseline" | "matched") =>
     request<Replay>(`/api/hardening/runs/${encodeURIComponent(key)}/replay?episode=${encodeURIComponent(episode)}&ghost=${ghost}`),
 };
+// ---------------------------------------------------------------- M7 regression gate
+export interface GateStatus {
+  gate: string;
+  candidate_id: string;
+  status: "promoted" | "rejected" | "not_eligible";
+  label: string;
+  version: string | null;
+  eligible: boolean;
+  passes_all: boolean;
+  failed_criteria: string[];
+}
+export interface GateRate {
+  episodes: number;
+  fell: number;
+  numerical: number;
+  valid: number;
+  fall_rate: number | null;
+  wilson_95: [number, number] | null;
+}
+export interface GateRow {
+  outcome: Outcome;
+  reason: string | null;
+  fall_time_s: number | null;
+  time_after_push_s: number | null;
+  max_tilt_after_push_deg: number | null;
+  progress_m: number;
+  reflex_activation: number | null;
+}
+export interface GateNominalRow {
+  id: string;
+  baseline: Outcome;
+  candidate: Outcome;
+  baseline_displacement_m: [number, number];
+  candidate_displacement_m: [number, number];
+  displacement_difference_m: number;
+  tolerance_m: number;
+  within_tolerance: boolean;
+  reflex_activation: number;
+}
+export interface GateRegression {
+  id: string;
+  start_substep: number;
+  start_s: number;
+  baseline: GateRow;
+  candidate: GateRow;
+}
+export interface GateCondition {
+  id: string;
+  force_n: number;
+  ground_friction_mu?: number;
+  payload_kg?: number;
+  baseline: GateRate;
+  candidate: GateRate;
+  increase: number;
+  recovered: number;
+  mcnemar_one_sided_p: number;
+  pass: boolean;
+  regressions: GateRegression[];
+}
+export interface GateCandidate {
+  candidate_id: string;
+  seed: number;
+  primary: boolean;
+  record: string;
+  gate_status: GateStatus;
+  passes_all: boolean;
+  failed_criteria: string[];
+  G1_nominal: { pass: boolean; falls: number; numerical: number; episodes: number; failures: string[]; rows: GateNominalRow[] };
+  G2_holdout: {
+    pass: boolean;
+    checks: Record<string, boolean>;
+    baseline: GateRate;
+    candidate: GateRate;
+    rate_cap: number;
+    recovered: string[];
+    regressed: string[];
+    candidate_numerical: string[];
+    mcnemar_one_sided_p: number;
+  };
+  G3_regression: { pass: boolean; checks: Record<string, boolean>; baseline: GateRate; candidate: GateRate; limit: number; recovered: number; regressed: number; conditions: GateCondition[] };
+  G4_numerical: { pass: boolean; candidate_numerical: number };
+  known_failures: { baseline: GateRate; candidate: GateRate; recovered: number; still_failing: string[]; regressed: string[] };
+}
+export interface GateHoldoutRow {
+  episode: HardeningEpisode;
+  baseline: GateRow;
+  candidates: Record<string, GateRow>;
+}
+export interface RegistryInfo {
+  active: string | null;
+  history: { version: string; reason: string }[];
+  versions: { version: string; parent: string | null; candidate_id: string | null; gate: string | null; statement: string | null; created_utc: string; policy: { path: string; sha256: string }; reflex: { record: string; record_sha256: string } | null }[];
+  rejected: { candidate_id: string; gate: string; failed_criteria: string[]; statement: string; active_unchanged: string }[];
+  path: string;
+}
+export interface GateInfo {
+  available: boolean;
+  semantics: string;
+  registry: RegistryInfo;
+  result_origin?: "precomputed";
+  preset?: { id: string; version: number; title: string; source: Record<string, string> };
+  gate?: { name: string; path: string; sha256: string; locked_sha256: string };
+  config_path?: string;
+  created_before_evaluation?: boolean;
+  primary_rule?: string;
+  suites?: Record<"holdout" | "nominal" | "gauntlet" | "known_failures", number>;
+  suite_notes?: Record<string, string>;
+  gauntlet?: { starts_substeps: [number, number]; duration_substeps: number; direction: [number, number, number] };
+  statistics?: { paired_test: string; interval: string };
+  criteria_definition?: {
+    G1_nominal: { max_falls: number; max_numerical: number; displacement_tolerance_m: number; displacement_tolerance_rel: number };
+    G2_holdout: { require_fewer_falls: boolean; max_fall_rate_floor: number; required_rate_drop: number; mcnemar_one_sided_alpha: number };
+    G3_regression: { max_fall_rate_increase_abs: number; per_condition: boolean };
+    G4_numerical: { max_numerical: number };
+  };
+  decision?: { candidate_id: string; verdict: "promote" | "reject"; failed_criteria: string[]; statement: string; note: string };
+  candidates?: GateCandidate[];
+  holdout?: GateHoldoutRow[];
+  nominal_episodes?: HardeningEpisode[];
+  results_sha256?: string;
+  accounting?: { rollouts: number; controllers: number };
+  timing?: { wall_s: number; workers: number };
+  created_utc?: string;
+  provenance?: { git: { commit: string; dirty: boolean | null } };
+  reproduce?: string;
+}
+export const gateApi = {
+  info: () => request<GateInfo>("/api/gate"),
+  replay: (candidate: string, episode: string, ghost: "baseline" | "matched" = "baseline") =>
+    request<Replay>(`/api/gate/replay?candidate=${encodeURIComponent(candidate)}&episode=${encodeURIComponent(episode)}&ghost=${ghost}`),
+};
+export function gateStatusFor(gate: GateInfo | null, candidateId: string | undefined): GateStatus | null {
+  if (!gate?.candidates || !candidateId) return null;
+  return gate.candidates.find((c) => c.candidate_id === candidateId)?.gate_status ?? null;
+}

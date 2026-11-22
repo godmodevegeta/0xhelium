@@ -24,6 +24,7 @@ SMOKE_MODULES = frozenset({
     "test_policy.py", "test_actor_parity.py", "test_model.py", "test_scene.py", "test_fall.py",
     "test_metrics.py", "test_suite_config.py", "test_scenario_schema.py", "test_openrouter.py",
     "test_hardening.py", "test_import_hygiene.py", "test_repo_hygiene.py", "test_independence.py",
+    "test_gate.py",
 })  # fmt: skip
 
 

@@ -3,9 +3,9 @@
 A CPU-first simulation robustness prototype for legged robots. Milestone M0 runs an existing
 pretrained Go1 walking policy in native MuJoCo and records a trajectory with a run manifest.
 
-Status: M0–M5 approved; M6 (CPU reflex hardening candidates, simulation-first workspace)
-implemented locally, awaiting review, not deployed. Every command below was run, and its observed
-output is in `docs/milestones/M0.md` to `M6.md`.
+Status: M0–M6.1 approved; M7 (pre-registered regression gate and policy registry) evaluated once
+locally, awaiting review, not deployed. Every command below was run, and its observed output is in
+`docs/milestones/M0.md` to `M7.md`.
 The pretrained policy (`go1-walk-s0` from [weeble](https://github.com/mottopanikeiku/weeble)) passed
 the fixed walking criteria: a 10 s forward run at 0.944 m/s mean over 2–10 s, and a zero-command run
 that stayed within 0.016 m. A 100 N shove toward its right for 0.1 s, started at each of the 256
@@ -127,7 +127,7 @@ values, which go through the same validator. Without a key everything else still
 
 M6 candidate hardening: a bounded 10-parameter residual reflex around the frozen policy, tuned by
 seeded CMA-ES on CPU MuJoCo (not PPO, not network fine-tuning). The result is a candidate record;
-nothing is promoted until the M7 regression gate.
+`harden` never promotes anything.
 
 ```bash
 uv run robustlab harden --seed 0 --out runs/m6/seed0            # about 20 s on 8 processes
@@ -150,6 +150,23 @@ opens on a labelled sample replay. The **Harden controller** mode runs the same 
 optimization progress, and replays the frozen baseline and the candidate on identical shoves.
 `uv run python scripts/ui_checks.py` checks the layout and the main flows against a running server
 at 1440×900, 1280×800, 1024×768 and 390×844 (add `--nokey-base` for the no-OpenRouter fallback).
+
+M7 regression gate: `examples/m7/gate-v1.json` was committed before evaluation. It pins the five
+M6 candidates, the suites (10 locked attacks, 13 nominal walks, a 1280-episode regression gauntlet,
+34 known failures), the criteria G1–G4 and the one eligible primary candidate. It was evaluated
+once.
+
+```bash
+uv run robustlab gate             # refuses: gate-v1 already has a result (presets/m7-gate-v1/)
+uv run robustlab gate --verify    # recomputes all 8022 rollouts (~100 s on 8 processes) and compares
+```
+
+Result: the primary `cand-ea7b9dbc0bbd` passed G1–G4, with 16 individual low-friction gauntlet
+regressions listed in `M7.md`, and was promoted. `policies/registry/active.json` points at
+`v1-cand-ea7b9dbc0bbd`: the frozen policy plus that reflex. Only the gate writes the registry. In
+the web app, **Results** shows the gate evidence and replays any gate episode, and **Harden
+controller** shows the gate verdict for the candidate shown. Stress, Discover and Design still
+evaluate the frozen baseline v0.
 
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and
 `manifest.json` into the `--out` directory. It refuses to replace an existing run unless
@@ -182,6 +199,9 @@ committed; `scripts/fetch_assets.py` re-downloads them from the pinned weeble co
   grids, timings, UI checks and screenshots
 - `.kiro/specs/m6-ui-redesign/` and `docs/milestones/M6_UI.md` — M6.1 simulation-first UI: audit,
   design, before/after screenshots, automated UI checks
+- `.kiro/specs/m7-regression-gate/` — M7 requirements, design and tasks
+- `docs/milestones/M7.md` — M7 evidence: pre-registration, suites, criteria, all five candidates,
+  individual regressions, registry, API/UI, limitations
 - `docs/decision-log/` — architecture decision records
 
 ## License

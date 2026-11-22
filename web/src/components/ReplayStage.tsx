@@ -4,11 +4,11 @@
 // One renderer, scene and camera live as long as the robot model; a new replay only swaps the two
 // robot mesh groups, so mode switches never remount the stage or refetch meshes, and the camera
 // offset and playback speed carry over between replays.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { COLORS, decodeFloat32, decodeInt32, fmt, type ModelPayload, type Replay } from "../api";
-import { directionWord, robotNames, sourceInfo } from "../replayInfo";
+import { computeText, directionWord, robotNames, sourceInfo } from "../replayInfo";
 import { PALETTE } from "../theme";
 
 interface Current {
@@ -103,6 +103,7 @@ export function ReplayStage({ model, current, busy, error }: Props) {
   const mainLabelRef = useRef<HTMLDivElement>(null);
   const ghostLabelRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
+  const placeRef = useRef<(() => void) | null>(null); // re-place labels from outside the loop
   const robotsRef = useRef<Robot[]>([]);
   const replayRef = useRef<Replay | null>(null);
   const floorRef = useRef<THREE.Mesh | null>(null);
@@ -296,6 +297,11 @@ export function ReplayStage({ model, current, busy, error }: Props) {
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
+    placeRef.current = () => {
+      const rp = replayRef.current;
+      const robots = robotsRef.current;
+      if (rp && robots.length === 2) placeLabels(robots, frameRef.current);
+    };
     const onResize = () => {
       const w = mount.clientWidth;
       const h = mount.clientHeight;
@@ -308,6 +314,7 @@ export function ReplayStage({ model, current, busy, error }: Props) {
     observer.observe(mount);
     return () => {
       cancelAnimationFrame(raf);
+      placeRef.current = null;
       observer.disconnect();
       controls.dispose();
       renderer.dispose();
@@ -316,6 +323,12 @@ export function ReplayStage({ model, current, busy, error }: Props) {
       engineRef.current = null;
     };
   }, [geometries]);
+
+  // A label's text (and width) changes in a React commit; place it again before the browser paints
+  // instead of waiting for the next animation frame, so a wider label is never drawn unclamped.
+  useLayoutEffect(() => {
+    placeRef.current?.();
+  });
 
   // Robots, floor cue and shove arrow: per replay.
   useEffect(() => {
@@ -445,7 +458,7 @@ export function ReplayStage({ model, current, busy, error }: Props) {
             </div>
           </>
         )}
-        <div className="stage-note">Recorded MuJoCo poses · no physics in the browser</div>
+        <div className="stage-note" title={replay?.compute?.engine}>{replay ? computeText(replay) : "Physics: native MuJoCo on the server · replayed here"}</div>
         {(!model || !current) && (
           <div className="stage-overlay" role="status">
             {error ? <span className="error">{error}</span> : <><span className="spinner" /> {!model ? "Loading robot meshes…" : "Loading the sample replay (re-simulated on the server)…"}</>}

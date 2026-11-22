@@ -256,3 +256,32 @@ M6.1 corrections after acceptance (`8f734b6`, branch `m6-ui-fixes`):
 | Mobile header | One-line header below 560 px | 40 px at 390×844 (check ≤ 64 px) |
 | Fullscreen | Headed-Chrome check | Real fullscreen entered and exited; first attempt refused while the window was unfocused |
 | Stop hook | Smoke subset (127 tests) and `scripts/milestone_check.sh` | Smoke 3.6–4.6 s; milestone check PASS at clean `8f734b6` |
+
+## M7 — Independent regression gate and policy promotion
+
+Spec: `.kiro/specs/m7-regression-gate/`. Branch `m7-regression-gate`, not merged. Evidence:
+`docs/milestones/M7.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| 1 | Preconditions: M6.1 corrections tagged `m6-ui-baseline` and merged | `562c0da`, `6b3e064` | milestone check PASS at `8f734b6` |
+| 2.1 | Five M6 candidate records as a hashed preset | `e195372` | preset hashes verified by `load_preset` |
+| 2.2 | `scripts/make_gate_config.py` → `examples/m7/gate-v1.json`; primary chosen from M6 evidence only | `854b879` | committed before any gate code touched locked episodes |
+| 3 | Gate config verification, suites, G1–G4, exact McNemar, Wilson, registry, `robustlab gate` CLI | `0202138` | 14 synthetic-outcome tests; no locked rollouts in tests |
+| 4 | One evaluation at clean `0202138`; result preset and registry | `c04edae` | 8022 rollouts in 102.0 s; primary passed G1–G4 and promoted; `--verify` reproduced `results_sha256`; second run refused |
+| 5 | `GET /api/gate`, digest-verified gate replays, shared reflex replay; Harden pill and Results gate evidence; frozen-baseline notes; label placement after each React commit | `4cf2f3a` | `tests/test_api_gate.py` 7 pass; `ui_checks.py` 295 layout checks and flows pass; screenshots reviewed |
+| 6 | `M7.md`, README, build log; CLI once-only test; milestone check | `243933d` | milestone check PASS at clean `243933d` (smoke 142, fast 287, integration 36, web build) |
+
+Notes:
+- **Label fix.** The new gate label scan reproduced an intermittent mobile issue in 2 of 3 runs: a
+  label whose text widened was drawn outside the canvas until the next animation frame placed it.
+  Labels are now also placed in a layout effect after each commit. Afterwards, 5 runs of 8 scans
+  each showed none.
+- **Wording check.** The M6 check rejected any "promoted" text. It now accepts only
+  gate-attributed wording ("Promoted by gate-v1 as v1-…", the "Promoted v1" robot label). It also
+  requires a newly run candidate to show "not evaluated by the regression gate".
+- **Documentation-sync hook.** `PostTaskExec` did not fire, because `tasks.md` was edited directly.
+  This section and the README were updated by hand.
+- **Replay compute display** (`230cbac`, test fix after): the stage note shows measured server
+  work per replay (episodes, `mj_step` calls, policy steps, wall time) instead of "no physics in
+  the browser"; gate and hardening replays also name the run they come from.

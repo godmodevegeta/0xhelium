@@ -1,0 +1,1 @@
+{"schema_version":1,"kind":"robustlab-policy-version","version":"v0-baseline","parent":null,"policy":{"path":"policies/go1-walk-s0.json","sha256":"42138b2b29663a8f72575af7354ab59b60f381446ee9e4ec2b45d83a0881a982"},"reflex":null,"source":"frozen pretrained go1-walk-s0 (M0)","created_utc":"2026-11-22T07:01:58Z"}

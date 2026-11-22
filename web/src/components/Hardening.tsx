@@ -1,13 +1,16 @@
 // Policy Hardening (M6): search a bounded residual reflex around the frozen policy on the server's
-// CPU, then compare baseline and candidate on identical episodes. A candidate is never shown as
-// the live policy: M7's regression gate decides promotion.
+// CPU, then compare baseline and candidate on identical episodes. This mode never promotes: the
+// status pill shows the verdict of the pre-registered M7 gate (gate-v1) for the candidate shown.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ShowReplay } from "../App";
 import {
   COLORS,
   fmt,
+  gateStatusFor,
   hardeningApi,
   type CandidateRecord,
+  type GateInfo,
+  type GateStatus,
   type ComparisonRow,
   type HardeningInfo,
   type HardeningStatus,
@@ -19,6 +22,7 @@ import { Advanced, Details, Evidence, EvidenceLink, ModeIntro, useJobReport } fr
 
 interface Props {
   info: HardeningInfo;
+  gate: GateInfo | null;
   show: ShowReplay;
   onRefresh: () => void;
   replaying: string | null;
@@ -39,11 +43,18 @@ const CHANGE_TEXT: Record<string, string> = {
   numerical: "numerical failure",
 };
 
+function GatePill({ status }: { status: GateStatus | null }) {
+  if (!status) return <span className="status-pill">Candidate · not evaluated by the regression gate</span>;
+  if (status.status === "promoted") return <span className="status-pill ok">Promoted by {status.gate} as {status.version}</span>;
+  if (status.status === "rejected") return <span className="status-pill">Rejected by {status.gate} · frozen baseline stays active</span>;
+  return <span className="status-pill">Evaluated by {status.gate} · not eligible for promotion</span>;
+}
+
 function surv(s: SetSummary | null | undefined) {
   return s ? `${s.attack_survived}/${s.attacks}` : "—";
 }
 
-export function Hardening({ info, show, onRefresh, replaying }: Props) {
+export function Hardening({ info, gate, show, onRefresh, replaying }: Props) {
   const [current, setCurrent] = useState<Current | null>(
     info.preset ? { key: info.preset.key, record: info.preset.record, origin: "precomputed" } : null,
   );
@@ -148,13 +159,14 @@ export function Hardening({ info, show, onRefresh, replaying }: Props) {
 
   useJobReport(running, `CPU hardening${last ? ` · generation ${last.generation}/${runGenerations}` : ` · ${status?.stage ?? "queued"}`}`);
   const totalNominalFell = (m?: typeof tr) => (m?.baseline_summary.nominal_fell ?? 0);
+  const gateStatus = gateStatusFor(gate, rec?.candidate_id) ?? (current?.origin === "precomputed" ? info.preset?.gate_status ?? null : null);
   return (
     <>
       <div className="mode">
         <ModeIntro eyebrow="Harden controller · CPU reflex search" title="Tune a bounded reflex around the frozen policy">
           <p>The pretrained policy stays unchanged. Seeded CMA-ES tunes a 10-parameter reflex on the server CPU against recorded shove failures and nominal walking. Not PPO, not fine-tuning.</p>
         </ModeIntro>
-        <div><span className="status-pill">Candidate · pending M7 regression evaluation</span></div>
+        <div><GatePill status={gateStatus} /></div>
         <div className="group">
           <label className="group-label" htmlFor="harden-focus">Failures to harden against</label>
           <select id="harden-focus" value={focus} onChange={(e) => setFocus(e.target.value)} disabled={running}>
@@ -183,7 +195,7 @@ export function Hardening({ info, show, onRefresh, replaying }: Props) {
             )}
             {error && <span className="error">{error}</span>}
             {status?.status === "failed" && <span className="error">Hardening failed: {status.error}</span>}
-            {!running && !error && <span>Population {info.defaults.popsize} on {info.defaults.workers} CPU workers, {info.limits.wall_clock_s} s cap. The result is a candidate, never a promoted policy.</span>}
+            {!running && !error && <span>Population {info.defaults.popsize} on {info.defaults.workers} CPU workers, {info.limits.wall_clock_s} s cap. A run here produces a candidate; it is never promoted from this page.</span>}
           </div>
         </div>
 
@@ -243,7 +255,7 @@ export function Hardening({ info, show, onRefresh, replaying }: Props) {
         <EvidenceLink />
       </div>
       <Details>
-        <HardeningDetails info={info} current={current} history={history} running={running} onOpen={poll} />
+        <HardeningDetails info={info} current={current} history={history} running={running} onOpen={poll} gateStatus={gateStatus} />
       </Details>
     </>
   );
@@ -315,7 +327,7 @@ function ComparisonTable({ title, rows, open }: { title: string; rows: Compariso
   );
 }
 
-function HardeningDetails({ info, current, history, running, onOpen }: { info: HardeningInfo; current: Current | null; history: HistoryEntry[]; running: boolean; onOpen: (id: string) => void }) {
+function HardeningDetails({ info, current, history, running, onOpen, gateStatus }: { info: HardeningInfo; current: Current | null; history: HistoryEntry[]; running: boolean; onOpen: (id: string) => void; gateStatus: GateStatus | null }) {
   const rec = current?.record;
   const grids = current?.origin === "precomputed" ? info.preset?.grids : null;
   return (
@@ -327,8 +339,9 @@ function HardeningDetails({ info, current, history, running, onOpen }: { info: H
       )}
       {rec && (
         <>
-          <p className="finding small">{rec.result.statement} Training and validation-preview sets are reported separately; the locked M7 test set
-            ({rec.sets.locked_test.episodes} episodes, sha {rec.sets.locked_test.sha256.slice(0, 12)}) was not evaluated.</p>
+          <p className="finding small">{rec.result.statement} Training and validation-preview sets are reported separately; the locked test set
+            ({rec.sets.locked_test.episodes} episodes, sha {rec.sets.locked_test.sha256.slice(0, 12)}) was not evaluated by this hardening run. The M7 gate
+            evaluated it once for the five registered candidates; see Results · Regression gate.</p>
           {rec.measurements.train.comparison && <ComparisonTable title="Training set (used for tuning)" rows={rec.measurements.train.comparison} open />}
           {rec.measurements.validation_preview.comparison && <ComparisonTable title="Validation preview (not used for tuning; distinct gait phases and attack configurations)" rows={rec.measurements.validation_preview.comparison} />}
           {grids && (
@@ -359,7 +372,8 @@ function HardeningDetails({ info, current, history, running, onOpen }: { info: H
             <div className="card small">
               <h3>Provenance</h3>
               <dl className="facts">
-                <dt>Status</dt><dd>{rec.status} · {rec.regression_gate}</dd>
+                <dt>Record</dt><dd>{rec.status} · written at M6: “{rec.regression_gate}” (records are immutable)</dd>
+                <dt>Gate</dt><dd>{gateStatus ? gateStatus.label : "not evaluated by the regression gate"}</dd>
                 <dt>Base policy</dt><dd>{rec.base_policy.path} · sha {rec.base_policy.sha256.slice(0, 12)} · weights unmodified</dd>
                 <dt>Sets</dt><dd>{rec.sets.name} · sha {rec.sets.sha256.slice(0, 12)}</dd>
                 <dt>Optimizer</dt><dd>CMA-ES seed {rec.optimizer.config.seed}, popsize {rec.optimizer.config.popsize}, ≤ {rec.optimizer.config.max_generations} generations{rec.optimizer.config.focus ? `, focus ${rec.optimizer.config.focus}` : ""}</dd>
