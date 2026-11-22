@@ -20,7 +20,7 @@ import { ReplayStage } from "./components/ReplayStage";
 import { Results } from "./components/Results";
 import { ScenarioDesigner } from "./components/ScenarioDesigner";
 import { JobContext, ModeContext } from "./components/Workspace";
-import { directionWord, outcomeText, robotNames, sourceInfo } from "./replayInfo";
+import { directionWord, evidenceText, outcomeText, robotNames, sourceInfo } from "./replayInfo";
 
 type Tab = "designer" | "live" | "discovery" | "hardening" | "results";
 const TABS: { key: Tab; label: string; aliases: string[] }[] = [
@@ -257,6 +257,7 @@ function SummaryStrip({ current }: { current: Current }) {
       <span className="item"><span className="dot" style={{ background: COLORS[main.outcome] }} />{names.main}: <strong>{outcomeText(main)}</strong></span>
       <span className="item"><span className="dot" style={{ background: COLORS[ghost.outcome] }} />{names.ghost}: <strong>{outcomeText(ghost)}</strong></span>
       <span className="item">{src.text}</span>
+      {evidenceText(r) && <span className="item">{evidenceText(r)}</span>}
       <span className="spacer" />
       <a href="#evidence" className="small">Evidence ↓</a>
     </div>

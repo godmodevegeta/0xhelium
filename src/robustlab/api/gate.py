@@ -243,5 +243,10 @@ class GateService:
             recorded_commit=self.result["provenance"]["git"]["commit"],
             what=f"{self.gate.name} result", digest_stop_on_fall=suite != "nominal",
             extra={"gate": self.gate.name, "suite": suite, "candidate_id": candidate_id,
-                   "candidate_status": status["status"], "gate_status": status},
+                   "candidate_status": status["status"], "gate_status": status,
+                   "evidence_compute": {
+                       "label": f"{self.gate.name} evaluation",
+                       "rollouts": self.result["accounting"]["rollouts"],
+                       "wall_s": self.result["timing"]["wall_s"],
+                       "workers": self.result["timing"]["workers"]}},
         )  # fmt: skip

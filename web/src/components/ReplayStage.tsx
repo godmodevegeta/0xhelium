@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { COLORS, decodeFloat32, decodeInt32, fmt, type ModelPayload, type Replay } from "../api";
-import { directionWord, robotNames, sourceInfo } from "../replayInfo";
+import { computeText, directionWord, robotNames, sourceInfo } from "../replayInfo";
 import { PALETTE } from "../theme";
 
 interface Current {
@@ -458,7 +458,7 @@ export function ReplayStage({ model, current, busy, error }: Props) {
             </div>
           </>
         )}
-        <div className="stage-note">Recorded MuJoCo poses · no physics in the browser</div>
+        <div className="stage-note" title={replay?.compute?.engine}>{replay ? computeText(replay) : "Physics: native MuJoCo on the server · replayed here"}</div>
         {(!model || !current) && (
           <div className="stage-overlay" role="status">
             {error ? <span className="error">{error}</span> : <><span className="spinner" /> {!model ? "Loading robot meshes…" : "Loading the sample replay (re-simulated on the server)…"}</>}

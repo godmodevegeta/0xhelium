@@ -18,6 +18,7 @@ So observation `o[t+1]` carries action `a[t-1]`, as in training. Nothing in an e
 from __future__ import annotations
 
 import math
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Protocol
@@ -32,6 +33,22 @@ from robustlab.policy.actor import Policy
 from robustlab.policy.observation import ObservationBuilder
 
 __all__ = ["WARNING_NAMES"]  # re-exported for M0 callers
+
+
+class _Work(threading.local):
+    """Simulation work done by this thread (episodes, control ticks, `mj_step` calls)."""
+
+    episodes = 0
+    ticks = 0
+    physics_steps = 0
+
+
+WORK = _Work()
+
+
+def work_done() -> tuple[int, int, int]:
+    """(episodes, control ticks, physics steps) simulated so far by the calling thread."""
+    return WORK.episodes, WORK.ticks, WORK.physics_steps
 
 
 class ActorLike(Protocol):
@@ -274,6 +291,9 @@ class EpisodeRunner:
             ):
                 done = k + 1
                 break
+        WORK.episodes += 1
+        WORK.ticks += done
+        WORK.physics_steps += done * self.n_substeps  # each tick runs n_substeps mj_step calls
         if done < n_ticks:
             rec.truncated = True
             for name in (

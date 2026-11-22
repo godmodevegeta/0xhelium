@@ -128,5 +128,10 @@ class HardeningService:
                 record["candidate_id"])}, recorded=recorded.get(spec.id),
             recorded_commit=record["provenance"]["git"]["commit"],
             extra={"run_id": key, "candidate_id": record["candidate_id"],
-                   "candidate_status": record["status"], "gate_status": status},
+                   "candidate_status": record["status"], "gate_status": status,
+                   "evidence_compute": {
+                       "label": "candidate search",
+                       "rollouts": record["accounting"]["total_rollouts"],
+                       "wall_s": record["timing"]["wall_s"],
+                       "workers": record["timing"]["workers"]}},
         )  # fmt: skip

@@ -52,3 +52,18 @@ export function directionWord(world: [number, number, number]): string {
   const names = ["forward", "forward-left", "left", "back-left", "backward", "back-right", "right", "forward-right"];
   return `toward ${names[Math.round(deg / 45) % 8]} (${deg.toFixed(0)}°)`;
 }
+
+const n = (v: number) => v.toLocaleString("en-US");
+
+// What the server computed to produce this replay. Only measured counts; a replay loaded from a
+// saved run says so instead.
+export function computeText(r: Replay): string {
+  const c = r.compute;
+  if (!c || c.episodes === 0) return "Recorded by the server's MuJoCo run · replayed here";
+  return `Server MuJoCo: ${c.episodes} episodes · ${n(c.physics_steps)} physics steps · ${n(c.control_ticks)} policy steps · ${c.wall_s.toFixed(2)} s${c.cached ? " (cached)" : ""} · replayed here`;
+}
+
+export function evidenceText(r: Replay): string | null {
+  const e = r.evidence_compute;
+  return e ? `from the ${e.label}: ${n(e.rollouts)} rollouts, ${e.wall_s.toFixed(0)} s on ${e.workers} CPU workers` : null;
+}

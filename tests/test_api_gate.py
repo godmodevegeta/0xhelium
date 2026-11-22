@@ -75,6 +75,10 @@ def test_gate_replay_reproduces_recorded_digests(client, episode) -> None:
     assert set(v["cases"]) == {"baseline", "candidate"}
     assert all("recorded_digest" in c for c in v["cases"].values())
     assert r["labels"]["attacked"].startswith(f"Candidate {PRIMARY[5:13]} (promoted")
+    # measured server work: 2 display runs + 2 runs re-made exactly as recorded for the digests
+    c = r["compute"]
+    assert c["episodes"] == 4 and c["physics_steps"] == 5 * c["control_ticks"] > 0
+    assert r["evidence_compute"]["rollouts"] == 8022
 
 
 def test_gate_replay_refusals(client) -> None:

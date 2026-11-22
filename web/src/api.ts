@@ -181,6 +181,10 @@ export interface Replay {
   which?: "final" | "search";
   // M5 scenario replays; M6 hardening replays use mode "hardening", M7 gate replays "gate"
   mode?: "single" | "suite" | "hardening" | "gate";
+  // Measured on the server for this replay (JobManager.replay)
+  compute?: { episodes: number; control_ticks: number; physics_steps: number; wall_s: number; engine: string; cached: boolean };
+  // The larger run this replay comes from (gate evaluation, candidate search)
+  evidence_compute?: { label: string; rollouts: number; wall_s: number; workers: number };
   gate?: string;
   suite?: "holdout" | "nominal" | "gauntlet" | "known_failures";
   gate_status?: GateStatus | null;

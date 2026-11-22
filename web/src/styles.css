@@ -204,7 +204,7 @@ legend { font-weight: 600; font-size: var(--fs-sm); padding: 0 var(--s1); color:
 .robot-label.main { color: var(--text); border-color: #8f8d86; }
 .robot-label.ghost { color: #d4d7ff; border-color: rgba(139, 147, 248, 0.7); }
 .robot-label .state { font-weight: 650; }
-.stage-note { position: absolute; right: var(--s3); bottom: var(--s2); font-size: 11px; color: var(--faint); pointer-events: none; }
+.stage-note { position: absolute; right: var(--s3); bottom: var(--s2); max-width: calc(100% - 2 * var(--s3)); text-align: right; font-size: 11px; color: var(--muted); pointer-events: none; font-variant-numeric: tabular-nums; }
 .stage-overlay { position: absolute; left: 50%; bottom: var(--s4); transform: translateX(-50%); display: inline-flex; gap: var(--s2); align-items: center; background: rgba(16, 16, 16, 0.9); border: 1px solid var(--border-strong); color: var(--text); padding: 6px var(--s3); border-radius: var(--pill); font-size: var(--fs-sm); max-width: calc(100% - 32px); }
 .spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: spin 0.9s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
