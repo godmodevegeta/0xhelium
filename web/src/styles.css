@@ -136,7 +136,12 @@ label { color: var(--muted); }
 
 .page { max-width: var(--content-max); margin: 0 auto; padding: var(--s5) var(--gutter) var(--s7); }
 .hero { display: grid; grid-template-columns: minmax(0, 34fr) minmax(0, 66fr); gap: var(--hero-gap); align-items: start; }
-.controls-col { min-width: 0; display: grid; gap: var(--s5); }
+.controls-col { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
+.controls-col > *, .mode, .mode > *, .group > *, .cta > *, .summary-box > * { min-width: 0; }
+.controls-col select { width: 100%; max-width: 100%; text-overflow: ellipsis; }
+.controls-col .summary-box table { table-layout: fixed; }
+.controls-col .summary-box td, .controls-col .summary-box th { overflow-wrap: anywhere; }
+.mode-intro h2 { overflow-wrap: break-word; }
 .stage-col { min-width: 0; }
 
 /* mode controls */

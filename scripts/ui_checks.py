@@ -74,10 +74,16 @@ GEOMETRY = r"""(() => {
     .filter(e => !(e.labels && e.labels.length) && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby')).map(name);
   const clipped = buttons.filter(b => !b.el.classList.contains('chip-btn') && b.el.scrollWidth > b.el.clientWidth + 1).map(b => b.n);
   const q = (s) => { const e = document.querySelector(s); return e && vis(e) ? rect(e) : null; };
+  const col = document.querySelector('.controls-col').getBoundingClientRect();
+  const stageCol = document.querySelector('.stage-col').getBoundingClientRect();
+  const escapes = [...document.querySelectorAll('.controls-col *')].filter(vis).filter(e => {
+    const r = e.getBoundingClientRect(); const box = e.closest('.table-scroll, table');
+    return !box && (r.right > col.right + 1 || r.left < col.left - 1); }).map(name).slice(0, 6);
+  const colsOverlap = stageCol.left < col.right - 1 && stageCol.top < col.bottom && col.top < stageCol.bottom;
   const play = q('.transport .play');
   return { vw: innerWidth, vh: innerHeight, scroll_w: document.documentElement.scrollWidth,
     canvas: q('.stage-card .canvas'), transport: q('.stage-card .transport'), controls: q('.controls-col'),
-    primaries, play, overlaps, tight, vgap, unlabeled, clipped,
+    primaries, play, overlaps, tight, vgap, unlabeled, clipped, escapes, colsOverlap,
     canvases: document.querySelectorAll('canvas').length, title: document.querySelector('.stage-title strong')?.textContent };
 })()"""
 
@@ -201,6 +207,8 @@ def judge(g: dict, width: int, height: int) -> dict:
         and g["play"]["h"] >= 44,
         "fields_labelled": not g["unlabeled"],
         "no_clipped_button_text": not g["clipped"],
+        "controls_stay_in_column": not g["escapes"],
+        "columns_do_not_overlap": not g["colsOverlap"],
     }
     if desktop:
         checks["canvas_above_fold"] = inside(g["canvas"])
@@ -260,6 +268,7 @@ async def run(base: str, nokey: str | None, out: Path) -> dict:
                                 "vgap",
                                 "unlabeled",
                                 "clipped",
+                                "escapes",
                             )
                         },
                     }
