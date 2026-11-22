@@ -178,3 +178,17 @@ Branch `m4-failure-discovery`. Measured results are in `docs/milestones/M4.md`.
 | 3 | `scripts/compare_search.py`; 20-seed matched comparison; fixture | `70a07c2`, `7d6aed8` | CMA-ES 20/20 vs Random 14/20 found (Fisher p = 0.020); both-found impulse p = 0.18 |
 | 4 | Discovery API, Failure Discovery tab | `93c6f90`, `ef0236c`, `5bb7acb` | 3 API runs 5.9–7.7 s, replays match; reproduce command matches digest |
 | 5 | Validation, docs | final M4 commit | 157 fast + 19 integration; Stop hook 13.5 s |
+
+## M5 — Multi-axis scenarios and the OpenRouter Scenario Designer
+
+Spec: `.kiro/specs/m5-openrouter-scenarios/`. Tag `m4-baseline` = `7127526`; merged into `main`
+with `--no-ff` (`26ef65a`, not pushed). Branch `m5-openrouter-scenarios`. Measured results are in
+`docs/milestones/M5.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| 1 | Spec; contact-rule inspection (floor priority 1 > feet 0, `npair` 0); MjSpec payload probe | `b473748` | Body/geom ids unchanged; mass +m |
+| 2 | Schema, scene friction/payload, model cache and reports, scenario runner, `scenario` CLI, tests, measurements | `962bcb9`, `ce4975e`, `aa7532e` | 175 fast + 27 integration; payload CoM-doubling bug found and fixed; nominal-path grid reproduces M2 digests 512/512 |
+| 3.1 | OpenRouter compiler, prompt, mocked tests, real smoke | `2bb0ed5`, `9b0d5b6` | 22 mocked tests; prompt v1 clamped silently (dropped); v2 had four frame errors in 10 prompts; v3: 7 valid, 3 explicit rejections, frame errors fixed |
+| 3.2–3.4 | `/api/scenarios/*`, Scenario Designer tab, replay payload box / floor tint / ghost label, CDP screenshot tool | `9b0d5b6` | 19 API tests; browser runs reproduce at clean commit (equal digests); screenshots in `runs/m5/screens/` |
+| 4 | Validation, docs | final M5 commit | 216 fast (Stop hook 12.4 s) + 27 integration; typecheck and build pass |

@@ -3,9 +3,9 @@
 A CPU-first simulation robustness prototype for legged robots. Milestone M0 runs an existing
 pretrained Go1 walking policy in native MuJoCo and records a trajectory with a run manifest.
 
-Status: M0–M3 approved; M4 (automated failure discovery and shrinking) implemented locally,
-awaiting review, not deployed. Every command below was run, and its observed output is in
-`docs/milestones/M0.md` to `M4.md`.
+Status: M0–M4 approved; M5 (friction and payload scenarios, OpenRouter Scenario Designer)
+implemented locally, awaiting review, not deployed. Every command below was run, and its observed
+output is in `docs/milestones/M0.md` to `M5.md`.
 The pretrained policy (`go1-walk-s0` from [weeble](https://github.com/mottopanikeiku/weeble)) passed
 the fixed walking criteria: a 10 s forward run at 0.944 m/s mean over 2–10 s, and a zero-command run
 that stayed within 0.016 m. A 100 N shove toward its right for 0.1 s, started at each of the 256
@@ -108,6 +108,21 @@ The search looks for the lowest-impulse shove (force 10–150 N, any horizontal 
 paired re-simulation, then shrunk locally. The web app's **Failure Discovery** tab runs the same
 search with live progress and replays the result next to the nominal robot.
 
+M5 multi-axis scenarios (floor friction, a payload box welded to the trunk, and the M1 push):
+
+```bash
+uv run robustlab scenario --file examples/m5/icy-heavy-shove.json --out runs/m5/x
+uv run robustlab scenario --file examples/m5/icy-heavy-shove.json --out runs/m5/x-suite \
+    --suite --trials 16 --seed 7                 # varies only the push start
+```
+
+A single run records the scenario, a matched baseline (same friction and payload, push removed)
+and the original trained condition. Values outside the bounds (μ 0.05–1.5, payload 0–5 kg, push
+0–150 N) are rejected, never clamped. The web app's **Scenario Designer** tab edits, validates,
+runs and replays scenarios. With `OPENROUTER_API_KEY` set on the server (optional
+`OPENROUTER_MODEL`, default `openai/gpt-4o-mini`), it can also turn a description into proposed
+values, which go through the same validator. Without a key everything else still works.
+
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and
 `manifest.json` into the `--out` directory. It refuses to replace an existing run unless
 `--overwrite` is given. Commands are body-frame `vx,vy,yaw` (m/s, m/s, rad/s) within the policy's
@@ -131,6 +146,9 @@ committed; `scripts/fetch_assets.py` re-downloads them from the pinned weeble co
 - `docs/milestones/M3.md` — M3 evidence: force sweep, presets, live runs, replay, endpoint timings
 - `.kiro/specs/m4-failure-discovery/` — M4 requirements, design and tasks
 - `docs/milestones/M4.md` — M4 evidence: Random Search vs CMA-ES, shrinking, web runs
+- `.kiro/specs/m5-openrouter-scenarios/` — M5 requirements, design and tasks
+- `docs/milestones/M5.md` — M5 evidence: friction and payload measurements, OpenRouter prompt
+  results, Scenario Designer runs
 - `docs/decision-log/` — architecture decision records
 
 ## License
