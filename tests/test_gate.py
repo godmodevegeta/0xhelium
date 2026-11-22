@@ -166,3 +166,14 @@ def test_registry_promote_and_reject(tmp_path) -> None:
     assert (
         version["parent"] == "v0-baseline" and version["policy"]["weights"] == "frozen, unmodified"
     )
+
+
+def test_cli_refuses_a_second_evaluation(tmp_path, capsys) -> None:
+    """gate-v1 already has a committed result: the CLI stops before any rollout."""
+    from robustlab.cli import EXIT_WRITE, main
+
+    assert (REPO_ROOT / "presets/m7-gate-v1/gate_result.json").exists()
+    code = main(["gate", "--root", str(REPO_ROOT), "--out", str(tmp_path / "gate")])
+    assert code == EXIT_WRITE
+    assert "already evaluated" in capsys.readouterr().err
+    assert not (tmp_path / "gate").exists()
