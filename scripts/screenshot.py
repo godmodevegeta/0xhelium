@@ -23,9 +23,12 @@ import websockets
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 
-def launch(width: int, height: int, port: int) -> tuple[subprocess.Popen, str]:
+def launch(
+    width: int, height: int, port: int, headless: bool = True
+) -> tuple[subprocess.Popen, str]:
     profile = tempfile.mkdtemp(prefix="chrome-cdp-")
-    flags = ["--headless=new", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+    flags = (["--headless=new", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
+             if headless else ["--no-first-run", "--no-default-browser-check"]) + [
              "--hide-scrollbars", f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
              f"--window-size={width},{height}", "about:blank"]  # fmt: skip
     proc = subprocess.Popen([CHROME, *flags], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

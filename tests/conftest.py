@@ -16,6 +16,23 @@ settings.register_profile("robustlab", derandomize=True, database=None, deadline
 settings.load_profile("robustlab")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Stop-hook smoke subset: fast, deterministic contract tests (policy/actor, model, scene, fall,
+# schemas, reflex/hardening logic, hygiene). The complete fast + integration suites remain the
+# mandatory milestone check (scripts/milestone_check.sh).
+SMOKE_MODULES = frozenset({
+    "test_policy.py", "test_actor_parity.py", "test_model.py", "test_scene.py", "test_fall.py",
+    "test_metrics.py", "test_suite_config.py", "test_scenario_schema.py", "test_openrouter.py",
+    "test_hardening.py", "test_import_hygiene.py", "test_repo_hygiene.py", "test_independence.py",
+})  # fmt: skip
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if item.path.name in SMOKE_MODULES and item.get_closest_marker("integration") is None:
+            item.add_marker(pytest.mark.smoke)
+
+
 POLICY_PATH = REPO_ROOT / "policies" / "go1-walk-s0.json"
 MODEL_XML = REPO_ROOT / "assets" / "go1" / "walk.xml"
 ORACLE_PATH = REPO_ROOT / "tests" / "reference" / "weeble_sim.py"

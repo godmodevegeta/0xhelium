@@ -1,3 +1,5 @@
+import { PALETTE } from "./theme";
+
 // Typed access to the FastAPI backend. All physics results come from the server.
 
 export type Outcome = "survived" | "fell" | "numerical";
@@ -587,10 +589,10 @@ export function decodeInt32(b64: string): Int32Array {
 }
 
 export const COLORS: Record<Outcome | "none", string> = {
-  survived: "#2e9d5b",
-  fell: "#d64545",
-  numerical: "#7b5cd6",
-  none: "#c9ced6",
+  survived: PALETTE.ok,
+  fell: PALETTE.fell,
+  numerical: PALETTE.numerical,
+  none: "#3a3936",
 };
 
 export function fmt(value: number | null | undefined, digits = 3): string {
