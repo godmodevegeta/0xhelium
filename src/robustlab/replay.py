@@ -14,6 +14,8 @@ from typing import Any
 import mujoco
 import numpy as np
 
+from robustlab.physics.scene import PAYLOAD_GEOM
+
 VISUAL_GROUP = 2
 FOOT_ORDER = ("FR", "FL", "RR", "RL")
 
@@ -71,6 +73,29 @@ def kinematic_frames(model: mujoco.MjModel, qpos: np.ndarray) -> tuple[np.ndarra
     return pos, quat
 
 
+def payload_box_frames(model: mujoco.MjModel, qpos: np.ndarray) -> dict | None:
+    """World pose of the welded payload box (M5) for each qpos row, or None if the model has no
+    payload. The box is drawn from the same kinematics as the robot, not placed by the browser."""
+    gid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, PAYLOAD_GEOM)
+    if gid < 0:
+        return None
+    data = mujoco.MjData(model)
+    pos = np.empty((qpos.shape[0], 3))
+    quat = np.empty((qpos.shape[0], 4))
+    for f in range(qpos.shape[0]):
+        data.qpos[:] = qpos[f]
+        mujoco.mj_kinematics(model, data)
+        pos[f] = data.geom_xpos[gid]
+        mujoco.mju_mat2Quat(quat[f], data.geom_xmat[gid])
+    body = int(model.geom_bodyid[gid])
+    return {
+        "half_size_m": [float(x) for x in model.geom_size[gid]],
+        "mass_kg": float(model.body_mass[body]),
+        "pos": _b64(pos, np.float32),
+        "quat": _b64(quat, np.float32),
+    }
+
+
 def case_payload(model: mujoco.MjModel, trajectory: dict[str, Any], outcome: dict) -> dict:
     """Replay data for one episode from an M1-format trajectory dict (frame 0 = reset state)."""
     qpos = np.vstack([np.asarray(trajectory["initial_qpos"]), np.asarray(trajectory["qpos"])])
@@ -78,6 +103,7 @@ def case_payload(model: mujoco.MjModel, trajectory: dict[str, Any], outcome: dic
         last_good = int(np.flatnonzero(~np.isfinite(qpos).all(axis=1))[0])
         qpos = qpos[:last_good]
     pos, quat = kinematic_frames(model, qpos)
+    payload_box = payload_box_frames(model, qpos)
     n = qpos.shape[0]
     up_z = [1.0] + list(trajectory["up_z"])[: n - 1]
     trunk_z = [float(qpos[0, 2])] + list(trajectory["trunk_z"])[: n - 1]
@@ -92,6 +118,7 @@ def case_payload(model: mujoco.MjModel, trajectory: dict[str, Any], outcome: dic
         "nonfoot": [bool(x) for x in nonfoot],
         "feet": feet,
         "outcome": outcome,
+        "payload_box": payload_box,
     }
 
 
@@ -104,12 +131,20 @@ def replay_payload(
     source: str,
     verification: dict | None = None,
     extra: dict | None = None,
+    case_models: dict[str, mujoco.MjModel] | None = None,
 ) -> dict[str, Any]:
-    """Combine two episodes (trajectory dict, outcome summary) into one synchronized replay."""
+    """Combine two episodes (trajectory dict, outcome summary) into one synchronized replay.
+    `case_models` overrides `model` per case ("nominal" / "attacked"), e.g. a scenario model
+    with a payload; visual geoms are identical across those models (the payload is not visual
+    group 2), so one mesh set serves both."""
     ctrl_dt = float(attacked[0]["ctrl_dt"])
+    models = {"nominal": model, "attacked": model, **(case_models or {})}
+    for name, m in models.items():
+        if len(visual_geoms(m)) != len(visual_geoms(model)):
+            raise ValueError(f"{name} model has a different visual geom set")
     cases = {
-        "nominal": case_payload(model, *nominal),
-        "attacked": case_payload(model, *attacked),
+        "nominal": case_payload(models["nominal"], *nominal),
+        "attacked": case_payload(models["attacked"], *attacked),
     }
     frames = max(c["frames"] for c in cases.values())
     return {

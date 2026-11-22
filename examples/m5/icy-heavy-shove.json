@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "kind": "robustlab-scenario",
+  "name": "icy-heavy-shove",
+  "command": [
+    1.0,
+    0.0,
+    0.0
+  ],
+  "horizon_s": 5.0,
+  "scene": "fall-contact",
+  "environment": {
+    "ground_friction_mu": 0.3
+  },
+  "payload": {
+    "mass_kg": 3.0,
+    "offset_xyz_m": [
+      0.0,
+      0.0,
+      0.04
+    ]
+  },
+  "push": {
+    "force_n": 100.0,
+    "direction_deg": 270.0,
+    "start_s": 2.0,
+    "duration_s": 0.1
+  }
+}

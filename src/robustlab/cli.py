@@ -396,6 +396,82 @@ def _cmd_discover(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_scenario(args: argparse.Namespace) -> int:
+    import json
+
+    root = Path(args.root)
+    from robustlab.assets import AssetError, verify_assets
+    from robustlab.scenarios.schema import ScenarioError, validate
+
+    try:
+        raw = json.loads(Path(args.file).read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"scenario: cannot read {args.file}: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    from robustlab.experiments.stack import load_stack
+
+    issues = verify_assets(root)
+    if issues:
+        for issue in issues:
+            print(f"FAIL  {issue}", file=sys.stderr)
+        return EXIT_ASSETS
+    try:
+        validated = validate(raw)
+    except ScenarioError as exc:
+        for error in exc.errors:
+            print(f"scenario: invalid {error['field']}: {error['reason']}", file=sys.stderr)
+        return EXIT_INVALID
+    for adj in validated.adjustments:
+        print(
+            f"adjusted         {adj['field']}: {adj['requested']} -> {adj['applied']} ({adj['reason']})"
+        )
+    out = Path(args.out)
+    if (out / "scenario_result.json").exists() and not args.overwrite:
+        print(f"scenario: {out / 'scenario_result.json'} exists (use --overwrite)", file=sys.stderr)
+        return EXIT_WRITE
+    try:
+        stack = load_stack(root, Path(args.policy), validated.scenario.scene)
+    except (AssetError, ValueError) as exc:
+        print(f"scenario: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    from robustlab.experiments.scenario_run import outcome_line, run_scenario_suite, run_single
+
+    scenario = validated.scenario
+    if args.suite:
+        try:
+            low, high = (float(x) for x in args.interval.split(","))
+            result = run_scenario_suite(scenario, stack, out, trials=args.trials,
+                                        interval_s=(low, high), seed=args.seed,
+                                        method=args.method, adjustments=validated.adjustments,
+                                        overwrite=args.overwrite)  # fmt: skip
+        except ValueError as exc:
+            print(f"scenario: {exc}", file=sys.stderr)
+            return EXIT_INVALID
+        agg = result["aggregates"]
+        print(f"suite            {result['trial_semantics']}")
+        for case in ("nominal", "attacked"):
+            a = agg[case]
+            label = "matched baseline" if case == "nominal" else "scenario (pushed)"
+            print(f"{label:<18} falls {a['physical_falls']}/{a['valid_trials']} valid, "
+                  f"numerical {a['numerical_failures']}")  # fmt: skip
+        print(f"original nominal {outcome_line(result['original'])}")
+    else:
+        result = run_single(scenario, stack, out, adjustments=validated.adjustments)
+        fr = result["model"]["friction"]
+        print(f"friction         requested {fr['requested_mu']} configured {fr['configured_mu']:g} "
+              f"observed at reset {fr['observed_at_reset']['sliding_mu_values']}")  # fmt: skip
+        print(f"total mass       {result['model']['mass']['total_mass_kg']:.3f} kg")
+        for name, case in result["cases"].items():
+            slip = case["slip"]["mean_slip_speed_mps"]
+            print(f"{name:<17}{outcome_line(case)}; progress {case['forward_progress_m']:.3f} m; "
+                  f"max tilt {case['max_tilt_deg']:.1f} deg; foot slip "
+                  f"{'n/a' if slip is None else f'{slip:.4f} m/s'}")  # fmt: skip
+        print(f"primary ghost    {result['primary_baseline']}")
+        print(f"results_sha256   {result['results_sha256']}")
+    print(f"record           {out / 'scenario_result.json'}")
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     import os
 
@@ -504,6 +580,21 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--overwrite", action="store_true")
     discover.add_argument("--root", default=".", help="repository root (default: current dir)")
     discover.set_defaults(func=_cmd_discover)
+
+    scenario = subparsers.add_parser(
+        "scenario", help="run a multi-axis scenario file (friction, payload, push)"
+    )
+    scenario.add_argument("--file", required=True, help="scenario JSON (robustlab-scenario v1)")
+    scenario.add_argument("--out", required=True)
+    scenario.add_argument("--suite", action="store_true", help="vary the push start over trials")
+    scenario.add_argument("--trials", type=int, default=16)
+    scenario.add_argument("--interval", default="2.0,3.024", help="push start interval low,high s")
+    scenario.add_argument("--method", choices=("stratified", "grid"), default="stratified")
+    scenario.add_argument("--seed", type=int, default=0)
+    scenario.add_argument("--policy", default="policies/go1-walk-s0.json")
+    scenario.add_argument("--overwrite", action="store_true")
+    scenario.add_argument("--root", default=".")
+    scenario.set_defaults(func=_cmd_scenario)
 
     serve = subparsers.add_parser("serve", help="start the web app (needs the server extra)")
     serve.add_argument("--host", default="127.0.0.1")

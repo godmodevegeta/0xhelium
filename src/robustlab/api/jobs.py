@@ -26,12 +26,19 @@ from robustlab.experiments.trace import _atomic_write_json
 
 RUN_ID = re.compile(r"^ls-\d{8}T\d{6}Z-\d{1,20}$")
 DISCOVERY_ID = re.compile(r"^ds-\d{8}T\d{6}Z-(random|cmaes)-\d{1,20}$")
+SCENARIO_ID = re.compile(r"^sc-\d{8}T\d{6}Z-[0-9a-f]{8}$")
 LIVE_SUBDIR = "live-stress"
 DISCOVERY_SUBDIR = "discovery"
+SCENARIO_SUBDIR = "scenarios"
+SCENARIO_MAX_TRIALS = 32  # trajectories are saved (and replayable) up to this many trials
 
 
 class BusyError(Exception):
     """An experiment is already queued or running."""
+
+
+class ScenarioRunError(ValueError):
+    """Scenario run parameters that cannot be executed (reported as 422)."""
 
 
 class Worker:
@@ -82,6 +89,19 @@ class DiscoveryJob:
     finished_utc: str | None = None
 
 
+@dataclass
+class ScenarioJob:
+    run_id: str
+    request: dict
+    total: int
+    status: str = "queued"  # queued | running | done | failed
+    completed: int = 0
+    trials: list = field(default_factory=list)
+    error: str | None = None
+    started_utc: str | None = None
+    finished_utc: str | None = None
+
+
 def _utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -106,14 +126,18 @@ class JobManager:
         self.discoveries: dict[str, DiscoveryJob] = {}
         self.discovery_dir = Path(runs_dir) / DISCOVERY_SUBDIR
         self.discovery_timeout_s = discovery_timeout_s
+        self.scenarios: dict[str, ScenarioJob] = {}
+        self.scenario_dir = Path(runs_dir) / SCENARIO_SUBDIR
         self._lock = threading.Lock()
         self._replay_cache: OrderedDict[tuple, dict] = OrderedDict()
 
     def _busy(self) -> bool:
-        """One expensive job (live run or discovery) at a time per server instance."""
+        """One expensive job (live run, discovery or scenario run) at a time per server."""
         active = ("queued", "running")
-        return any(j.status in active for j in self.jobs.values()) or any(
-            d.status in active for d in self.discoveries.values()
+        return (
+            any(j.status in active for j in self.jobs.values())
+            or any(d.status in active for d in self.discoveries.values())
+            or any(s.status in active for s in self.scenarios.values())
         )
 
     # ------------------------------------------------------------------ live runs
@@ -368,6 +392,174 @@ class JobManager:
             else:
                 job = self.discoveries.get(run_id)
                 entry["status"] = job.status if job else "incomplete"
+            out.append(entry)
+        return out
+
+    # ------------------------------------------------------------------ scenario runs (M5)
+
+    def start_scenario_run(
+        self,
+        validated,
+        *,
+        mode: str,
+        trials: int = 16,
+        interval_s: tuple[float, float] = (2.0, 3.024),
+        seed: int | None = None,
+        method: str = "stratified",
+        origin: dict | None = None,
+    ) -> ScenarioJob:
+        """Queue a validated fixed scenario: `single` (one deterministic paired run) or `suite`
+        (push start varied over `trials`). Raises ScenarioRunError / SuiteConfigError on bad
+        parameters before anything is written, BusyError if another job is active."""
+        from robustlab.experiments.scenario_run import (
+            run_scenario_suite,
+            run_single,
+            suite_config_for,
+        )
+
+        scenario = validated.scenario
+        seed_source = None
+        if mode == "suite":
+            if scenario.push is None:
+                raise ScenarioRunError(
+                    "a suite needs a push: without one every trial is the same deterministic "
+                    "episode, so repeating it would not give independent trials"
+                )
+            if not 2 <= trials <= SCENARIO_MAX_TRIALS:
+                raise ScenarioRunError(f"trials must be in [2, {SCENARIO_MAX_TRIALS}]")
+            seed_source = "supplied" if seed is not None else "drawn"
+            if seed is None:
+                seed = secrets.randbelow(2**32)
+            # Validates interval, method and timing against the horizon (SuiteConfigError).
+            suite_config_for(scenario, self.live_config.policy, trials=trials,
+                             interval_s=interval_s, seed=seed, method=method)  # fmt: skip
+        elif mode != "single":
+            raise ScenarioRunError("mode must be 'single' or 'suite'")
+        with self._lock:
+            if self._busy():
+                raise BusyError("an experiment, discovery or scenario run is already running")
+            run_id = f"sc-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{secrets.token_hex(4)}"
+            while run_id in self.scenarios or (self.scenario_dir / run_id).exists():
+                run_id = (
+                    f"sc-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{secrets.token_hex(4)}"
+                )
+            run_dir = self.scenario_dir / run_id
+            scenario_file = run_dir / "scenario.json"
+            shown = (
+                scenario_file.relative_to(self.root)
+                if scenario_file.is_relative_to(self.root)
+                else scenario_file
+            )
+            reproduce = f"uv run robustlab scenario --file {shown} --out runs/m5/reproduce-{run_id}"
+            if mode == "suite":
+                reproduce += (
+                    f" --suite --trials {trials} --interval {interval_s[0]:g},{interval_s[1]:g}"
+                    f" --method {method} --seed {seed}"
+                )
+            request = {
+                "schema_version": 1,
+                "run_id": run_id,
+                "mode": mode,
+                "scenario": scenario.to_dict(),
+                "scenario_sha256": scenario.sha256(),
+                "adjustments": validated.adjustments,
+                "origin": origin or {"kind": "manual"},
+                "suite": None
+                if mode == "single"
+                else {
+                    "trials": trials,
+                    "interval_s": list(interval_s),
+                    "method": method,
+                    "seed": seed,
+                    "seed_source": seed_source,
+                },
+                "requested_utc": _utc(),
+                "reproduce": reproduce,
+            }
+            job = ScenarioJob(run_id=run_id, request=request,
+                              total=trials if mode == "suite" else 1)  # fmt: skip
+            self.scenarios[run_id] = job
+        run_dir.mkdir(parents=True)
+        _atomic_write_json(scenario_file, scenario.to_dict())
+        _atomic_write_json(run_dir / "request.json", request)
+
+        def work(worker: Worker) -> None:
+            job.status, job.started_utc = "running", _utc()
+            try:
+                stack = worker.stack(scenario.scene)
+                if mode == "single":
+                    run_single(scenario, stack, run_dir, adjustments=validated.adjustments)
+                    job.completed = 1
+                else:
+
+                    def progress(i: int, trial: dict) -> None:
+                        job.completed = i + 1
+                        job.trials.append(trial)
+
+                    run_scenario_suite(scenario, stack, run_dir, trials=trials,
+                                       interval_s=interval_s, seed=seed, method=method,
+                                       adjustments=validated.adjustments,
+                                       on_trial=progress)  # fmt: skip
+                job.status = "done"
+            except Exception as exc:  # noqa: BLE001 - reported to the client
+                job.status, job.error = "failed", f"{type(exc).__name__}: {exc}"
+                (run_dir / "error.txt").write_text(traceback.format_exc())
+            finally:
+                job.finished_utc = _utc()
+
+        self.experiments.submit(work)
+        return job
+
+    def scenario_path(self, run_id: str) -> Path | None:
+        if not SCENARIO_ID.match(run_id):
+            return None
+        path = self.scenario_dir / run_id
+        return path if path.is_dir() else None
+
+    def scenario_status(self, run_id: str) -> dict | None:
+        path = self.scenario_path(run_id)
+        if path is None:
+            return None
+        job = self.scenarios.get(run_id)
+        request = (job.request if job else None) or _read_json(path / "request.json") or {}
+        status: dict[str, Any] = {"run_id": run_id, "request": request}
+        result = _read_json(path / "scenario_result.json")
+        if result is not None and (job is None or job.status == "done"):
+            status.update(status="done", result=result)
+        elif job is not None:
+            status.update(status=job.status, completed=job.completed, total=job.total,
+                          trials=list(job.trials), error=job.error)  # fmt: skip
+        else:
+            status.update(status="incomplete", error="no scenario_result.json (server restarted?)")
+        return status
+
+    def list_scenarios(self, limit: int = 20) -> list[dict]:
+        if not self.scenario_dir.is_dir():
+            return []
+        ids = sorted(
+            (p.name for p in self.scenario_dir.iterdir() if SCENARIO_ID.match(p.name)),
+            reverse=True,
+        )
+        out = []
+        for run_id in ids[:limit]:
+            path = self.scenario_dir / run_id
+            request = _read_json(path / "request.json") or {}
+            entry = {"run_id": run_id, "mode": request.get("mode"),
+                     "name": (request.get("scenario") or {}).get("name"),
+                     "origin": (request.get("origin") or {}).get("kind"),
+                     "requested_utc": request.get("requested_utc")}  # fmt: skip
+            result = _read_json(path / "scenario_result.json")
+            if result is None:
+                job = self.scenarios.get(run_id)
+                entry["status"] = job.status if job else "incomplete"
+            elif result["mode"] == "single":
+                case = result["cases"]["scenario"]
+                entry.update(status="done", outcome=case["outcome"], reason=case["reason"])
+            else:
+                att = result["aggregates"]["attacked"]
+                entry.update(status="done", physical_falls=att["physical_falls"],
+                             valid_trials=att["valid_trials"],
+                             numerical_failures=att["numerical_failures"])  # fmt: skip
             out.append(entry)
         return out
 

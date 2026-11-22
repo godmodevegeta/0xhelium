@@ -80,7 +80,29 @@ def _episode_outcome(summary: dict) -> dict:
     return {k: summary.get(k) for k in keys}
 
 
-def create_app(settings: ServerSettings | None = None) -> FastAPI:
+class ScenarioBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scenario: dict
+
+
+class CompileBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prompt: str = Field(max_length=4000)  # the compiler enforces its own, smaller limit
+
+
+class ScenarioRunBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scenario: dict
+    mode: Literal["single", "suite"] = "single"
+    trials: int = Field(default=16, ge=2, le=32)
+    interval_s: tuple[float, float] = (2.0, 3.024)
+    method: Literal["stratified", "grid"] = "stratified"
+    seed: int | None = Field(default=None, ge=0, lt=2**63)
+    compile_id: str | None = Field(default=None, pattern=r"^cp-\d{8}T\d{6}Z-[0-9a-f]{8}$")
+
+
+def create_app(settings: ServerSettings | None = None, compiler=None) -> FastAPI:
+    """`compiler` defaults to `OpenRouterCompiler.from_env()` (tests inject a mocked one)."""
     settings = settings or ServerSettings.from_env()
     hidden = load_preset(settings.root, HIDDEN_PHASE_DIR)
     live = load_preset(settings.root, LIVE_STRESS_DIR)
@@ -373,6 +395,104 @@ def create_app(settings: ServerSettings | None = None) -> FastAPI:
             )  # fmt: skip
 
         return await wait(jobs.replay(("discovery", run_id, which), compute))
+
+    # ------------------------------------------------------------------ scenario designer (M5)
+
+    from robustlab.api.scenarios import ScenarioService
+
+    scenarios = ScenarioService(settings, jobs, compiler)
+    app.state.scenarios = scenarios
+
+    def _validation_failure(exc) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": {
+            "code": "invalid_scenario", "message": "the scenario did not validate",
+            "errors": exc.errors}})  # fmt: skip
+
+    @app.get("/api/scenarios/config")
+    async def scenarios_config():
+        return scenarios.config()
+
+    @app.post("/api/scenarios/validate")
+    async def scenarios_validate(body: ScenarioBody):
+        from robustlab.scenarios.schema import ScenarioError, validate
+
+        try:
+            validated = validate(body.scenario)
+        except ScenarioError as exc:
+            return {"valid": False, "errors": exc.errors}
+        return await wait(jobs.replays.submit(lambda w: scenarios.preview(w, validated)))
+
+    @app.post("/api/scenarios/compile")
+    async def scenarios_compile(body: CompileBody, request: Request):
+        from robustlab.llm.openrouter import CompileError
+
+        client = request.client.host if request.client else "unknown"
+        try:
+            result = await asyncio.to_thread(scenarios.compile, body.prompt, client)
+        except CompileError as exc:
+            return JSONResponse(status_code=exc.status, content={"detail": exc.to_dict()})
+        if result.get("valid"):
+            from robustlab.scenarios.schema import validate
+
+            validated = validate(result["scenario"])
+            preview = await wait(jobs.replays.submit(lambda w: scenarios.preview(w, validated)))
+            # The preview validates the normalized document; keep the compile-time adjustments.
+            preview["adjustments"] = result["adjustments"]
+            result["preview"] = preview
+        return result
+
+    @app.post("/api/scenarios/runs", status_code=202)
+    async def scenarios_start(body: ScenarioRunBody):
+        from robustlab.api.jobs import ScenarioRunError
+        from robustlab.experiments.suite import SuiteConfigError
+        from robustlab.scenarios.schema import ScenarioError, validate
+
+        try:
+            validated = validate(body.scenario)
+        except ScenarioError as exc:
+            return _validation_failure(exc)
+        try:
+            origin = scenarios.origin_for(body.compile_id, validated.scenario)
+            job = jobs.start_scenario_run(
+                validated,
+                mode=body.mode,
+                trials=body.trials,
+                interval_s=body.interval_s,
+                seed=body.seed,
+                method=body.method,
+                origin=origin,
+            )
+        except BusyError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (ScenarioRunError, SuiteConfigError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"run_id": job.run_id, "request": job.request, "status": job.status}
+
+    @app.get("/api/scenarios/runs/{run_id}")
+    async def scenarios_status(run_id: str):
+        status = jobs.scenario_status(run_id)
+        if status is None:
+            raise HTTPException(404, "unknown scenario run")
+        if status.get("status") == "done" and status["result"]["mode"] == "suite":
+            from robustlab.experiments.suite import read_report
+
+            status["summary"] = report_summary(read_report(jobs.scenario_path(run_id)))
+        return status
+
+    @app.get("/api/scenarios/runs/{run_id}/replay")
+    async def scenarios_replay(
+        run_id: str, trial: int = 0, ghost: Literal["primary", "matched", "original"] = "primary"
+    ):
+        status = jobs.scenario_status(run_id)
+        if status is None or status.get("status") != "done":
+            raise HTTPException(404, "unknown or unfinished scenario run")
+        try:
+            plan = scenarios.replay_plan(jobs.scenario_path(run_id), status["result"], trial, ghost)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return await wait(
+            jobs.replay(("scenario", run_id, trial, plan["ghost"]["kind"]), plan["compute"])
+        )
 
     if settings.web_dist.is_dir():
         app.mount("/", StaticFiles(directory=settings.web_dist, html=True), name="web")
