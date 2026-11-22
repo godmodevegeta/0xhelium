@@ -140,6 +140,7 @@ label { color: var(--muted); }
 .controls-col > *, .mode, .mode > *, .group > *, .cta > *, .summary-box > * { min-width: 0; }
 .controls-col select { width: 100%; max-width: 100%; text-overflow: ellipsis; }
 .controls-col .summary-box table { table-layout: fixed; }
+.controls-col .summary-box table th:first-child { width: 44%; }
 .controls-col .summary-box td, .controls-col .summary-box th { overflow-wrap: anywhere; }
 .mode-intro h2 { overflow-wrap: break-word; }
 .stage-col { min-width: 0; }
@@ -290,6 +291,9 @@ footer { max-width: var(--content-max); margin: 0 auto; padding: 0 var(--gutter)
   .card table { display: block; overflow-x: auto; }
 }
 @media (max-width: 560px) {
+  .stage-head { flex-wrap: nowrap; min-height: 0; gap: var(--s2); }
+  .stage-title .xsmall { display: none; } /* the in-scene labels name both robots */
+  .stage-head .badge { flex: 0 1 auto; max-width: 46%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .transport-tools .key { flex-basis: 100%; }
   .transport-tools .spacer { display: none; }
   .transport-tools { justify-content: space-between; }

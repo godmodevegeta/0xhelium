@@ -209,22 +209,41 @@ export function ReplayStage({ model, current, busy, error }: Props) {
       const p = v.clone().project(camera);
       return { x: ((p.x + 1) / 2) * w, y: ((1 - p.y) / 2) * h, visible: p.z < 1 && p.z > -1 };
     };
+    // Robot labels: anchored above each trunk, kept inside the canvas and below the HUD, and never
+    // overlapping each other. When the two would collide, the ghost's label stacks above the
+    // opaque robot's (or the pair moves down together if there is no room above).
+    const GAP = 6;
     const placeLabels = (robots: Robot[], f: number) => {
       const main = mainLabelRef.current;
       const ghost = ghostLabelRef.current;
       if (!main || !ghost) return;
-      const w = mount.clientWidth;
-      const h = mount.clientHeight;
+      const W = mount.clientWidth;
+      const H = mount.clientHeight;
+      const hud = mount.querySelector<HTMLElement>(".hud");
+      const top = (hud && hud.offsetHeight ? hud.offsetTop + hud.offsetHeight : 0) + GAP;
       const lift = new THREE.Vector3(0, 0, LABEL_LIFT_M);
-      const a = project(trunk(robots[1], f).add(lift), w, h);
-      const b = project(trunk(robots[0], f).add(lift), w, h);
-      // Stack the ghost's label above the main one when the two robots are close on screen.
-      const close = Math.abs(a.x - b.x) < Math.max(main.offsetWidth, ghost.offsetWidth) / 2 + 12 && Math.abs(a.y - b.y) < 34;
-      const by = close ? Math.min(b.y, a.y) - main.offsetHeight - 6 : b.y;
-      main.style.transform = `translate(${a.x}px, ${a.y}px) translate(-50%, -100%)`;
-      ghost.style.transform = `translate(${b.x}px, ${by}px) translate(-50%, -100%)`;
-      main.style.visibility = a.visible ? "visible" : "hidden";
-      ghost.style.visibility = b.visible ? "visible" : "hidden";
+      const pa = project(trunk(robots[1], f).add(lift), W, H);
+      const pb = project(trunk(robots[0], f).add(lift), W, H);
+      const wa = main.offsetWidth, ha = main.offsetHeight, wb = ghost.offsetWidth, hb = ghost.offsetHeight;
+      const clampX = (x: number, w: number) => Math.min(Math.max(x, w / 2 + GAP), Math.max(w / 2 + GAP, W - w / 2 - GAP));
+      const clampY = (y: number, h: number) => Math.min(Math.max(y, top + h), H - GAP);
+      let ax = clampX(pa.x, wa), ay = clampY(pa.y, ha);
+      let bx = clampX(pb.x, wb), by = clampY(pb.y, hb);
+      const xOverlap = Math.min(ax + wa / 2, bx + wb / 2) - Math.max(ax - wa / 2, bx - wb / 2) > -GAP;
+      const yOverlap = Math.min(ay, by) - Math.max(ay - ha, by - hb) > -GAP;
+      if (xOverlap && yOverlap) {
+        by = ay - ha - GAP; // ghost label directly above the opaque robot's label
+        if (by - hb < top) {
+          by = top + hb;
+          ay = by + GAP + ha;
+        }
+        bx = clampX(ax, wb);
+        ax = clampX(ax, wa);
+      }
+      main.style.transform = `translate(${ax}px, ${ay}px) translate(-50%, -100%)`;
+      ghost.style.transform = `translate(${bx}px, ${by}px) translate(-50%, -100%)`;
+      main.style.visibility = pa.visible ? "visible" : "hidden";
+      ghost.style.visibility = pb.visible ? "visible" : "hidden";
     };
 
     let last = performance.now();

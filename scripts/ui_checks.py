@@ -82,7 +82,7 @@ GEOMETRY = r"""(() => {
   const colsOverlap = stageCol.left < col.right - 1 && stageCol.top < col.bottom && col.top < stageCol.bottom;
   const play = q('.transport .play');
   return { vw: innerWidth, vh: innerHeight, scroll_w: document.documentElement.scrollWidth,
-    canvas: q('.stage-card .canvas'), transport: q('.stage-card .transport'), controls: q('.controls-col'),
+    canvas: q('.stage-card .canvas'), transport: q('.stage-card .transport'), head: q('.stage-card .stage-head'), controls: q('.controls-col'),
     primaries, play, overlaps, tight, vgap, unlabeled, clipped, escapes, colsOverlap,
     canvases: document.querySelectorAll('canvas').length, title: document.querySelector('.stage-title strong')?.textContent };
 })()"""
@@ -177,6 +177,30 @@ class Page:
             )
 
 
+LABEL_SCAN = r"""(async (step) => {
+  const s = document.querySelector('.track input[type=range]');
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  const canvas = document.querySelector('.stage-card .canvas').getBoundingClientRect();
+  const hud = document.querySelector('.hud').getBoundingClientRect();
+  const out = { frames: 0, overlaps: [], outside: [], under_hud: [] };
+  const max = Number(s.max);
+  for (let f = 0; f <= max; f += step) {
+    set.call(s, String(f)); s.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 60));
+    const [a, b] = [...document.querySelectorAll('.robot-label')].map(e => e.getBoundingClientRect());
+    out.frames++;
+    const ix = Math.min(a.right, b.right) - Math.max(a.left, b.left), iy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    if (ix > 0 && iy > 0) out.overlaps.push(f);
+    for (const r of [a, b]) {
+      if (r.left < canvas.left - 0.5 || r.right > canvas.right + 0.5 || r.top < canvas.top - 0.5 || r.bottom > canvas.bottom + 0.5) out.outside.push(f);
+      if (hud.height > 0 && r.top < hud.bottom - 0.5 && r.right > hud.left && r.left < hud.right && Math.min(r.right, hud.right) - Math.max(r.left, hud.left) > 0
+          && [...document.querySelectorAll('.hud-chip')].some(c => { const k = c.getBoundingClientRect(); return Math.min(r.right, k.right) > Math.max(r.left, k.left) && Math.min(r.bottom, k.bottom) > Math.max(r.top, k.top); })) out.under_hud.push(f);
+    }
+  }
+  return out;
+})"""
+
+
 def button(text: str, scope: str = "document") -> str:
     return (f"[...{scope}.querySelectorAll('button')].find(e => e.offsetParent !== null && !e.disabled "
             f"&& e.textContent.trim().startsWith({json.dumps(text)}))")  # fmt: skip
@@ -222,6 +246,7 @@ def judge(g: dict, width: int, height: int) -> dict:
         )
     else:
         checks["canvas_in_first_viewport"] = inside(g["canvas"])
+        checks["stage_head_le_64px"] = g["head"] is not None and g["head"]["h"] <= 64
         checks["gutters_ge_16"] = (
             g["canvas"] is not None
             and g["canvas"]["x"] >= 15.5
@@ -269,6 +294,7 @@ async def run(base: str, nokey: str | None, out: Path) -> dict:
                                 "unlabeled",
                                 "clipped",
                                 "escapes",
+                                "head",
                             )
                         },
                     }
@@ -511,6 +537,28 @@ async def run(base: str, nokey: str | None, out: Path) -> dict:
                     links[query] = False
             results["flows"]["deep_links"] = links
 
+            # ---------------------------------------------------------- robot labels during playback
+            scans = {}
+            for width, height in ((1440, 900), (390, 844)):
+                await page.size(width, height)
+                for name, query, prefix in (("sample", "?tab=results", "Sample"),
+                                            ("harden", "?tab=harden&hreplay=preset-v1:m4-cmaes-s0:baseline", "Hardening"),
+                                            ("harden-matched", "?tab=harden&hreplay=preset-v1:m2-100N-500:matched", "Hardening")):  # fmt: skip
+                    await page.call("Page.navigate", url=base + "/" + query)
+                    await page.until(
+                        f"{TITLE}.startsWith({json.dumps(prefix)}) && !document.querySelector('.stage-overlay')",
+                        60,
+                    )
+                    await asyncio.sleep(0.8)
+                    if await page.eval(
+                        "document.querySelector('.transport .play').getAttribute('aria-label') === 'Pause'"
+                    ):
+                        await page.click("document.querySelector('.transport .play')")
+                    scans[f"{name}-{width}x{height}"] = await page.eval(f"{LABEL_SCAN}(2)")
+                await page.shot(out / f"labels-{width}x{height}.png")
+            results["flows"]["label_scans"] = scans
+            await page.size(1440, 900)
+
             # ---------------------------------------------------------- no OpenRouter key
             if nokey:
                 await page.call("Page.navigate", url=nokey + "/")
@@ -552,6 +600,11 @@ def main() -> int:
     ]
     failed += [f"camera.{k}" for k, v in flows["camera"].items() if not v]
     failed += [f"deep_link {q}" for q, ok in flows["deep_links"].items() if not ok]
+    failed += [
+        f"labels {k}: {v}"
+        for k, v in flows["label_scans"].items()
+        if v["overlaps"] or v["outside"] or v["under_hud"]
+    ]
     if flows["harden_replay"].get("page_text_promoted"):
         failed.append("harden_replay.promotion_wording")
     print(json.dumps(flows, indent=1)[:6000])

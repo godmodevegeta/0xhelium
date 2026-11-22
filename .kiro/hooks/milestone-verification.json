@@ -4,10 +4,10 @@
     {
       "name": "milestone-verification",
       "trigger": "Stop",
-      "description": "After each agent turn, run the fast CPU pytest suite (integration tests excluded; no GPU, long rollouts or network). Always exits 0 so a test failure is reported, not turned into another agent turn. Writes no files and makes no commits.",
+      "description": "After each agent turn, run the smoke subset (127 fast contract tests, about 4 s; no GPU, rollouts or network). Always exits 0 so a failure is reported rather than triggering another turn. The complete fast + integration suites, lint and web build are the mandatory milestone check: scripts/milestone_check.sh.",
       "action": {
         "type": "command",
-        "command": "uv run --frozen --offline pytest -q -m 'not integration' -p no:cacheprovider; echo \"milestone-verification: pytest exit code $?\"; exit 0",
+        "command": "uv run --frozen --offline pytest -q -m 'smoke and not integration' -p no:cacheprovider; echo \"milestone-verification (smoke subset; full suite: scripts/milestone_check.sh): pytest exit code $?\"; exit 0",
         "timeout": 30
       }
     }
