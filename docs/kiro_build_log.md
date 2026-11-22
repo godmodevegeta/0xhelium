@@ -221,3 +221,29 @@ Notes:
   above the fold; progress now uses the run's own generation cap; timeline markers are clipped.
 - **Documentation-sync hook:** `PostTaskExec` did not fire because `tasks.md` was edited directly.
   This section and the README were updated by hand under the hook's rules.
+
+## M6.1 — Simulation-first UI rebuild
+
+Spec: `.kiro/specs/m6-ui-redesign/`. Branch `m6-ui-redesign` from `m6-cpu-hardening`
+(`fef2ad0`). UI only: `git diff m6-cpu-hardening -- src/ tests/` is empty. Evidence is in
+`docs/milestones/M6_UI.md`.
+
+| Task | Kiro spec output | Commit | Observed verification |
+| --- | --- | --- | --- |
+| UI0 | Audit: before screenshots at 4 sizes, crowding notes, component inventory, reference license check (no license file found, so nothing reused) | `380d6e4` | `runs/m6ui/before/` |
+| UI1–UI3 | Token theme, shell and pill nav, 34/66 hero, `ReplayStage` + transport, five one-CTA modes with Advanced, Results mode, summary strip, expandable evidence | `9542e3b` | `tsc` and build pass; screenshots reviewed (9 visual fixes) |
+| UI4 | Extended `scripts/ui_checks.py` (overlap, gap, label, containment, above-fold checks; flows, deep links, no-key); containment fix; contrast fix | `f2316eb`, `72f7d95` | 290 layout checks and all flows pass on the real backend; 265 fast (26.2 s) + 36 integration; ruff clean |
+
+Notes:
+
+- **Fullscreen.** Headless Chrome refuses `requestFullscreen` ("not granted"), so the stage falls
+  back to an in-page expanded view. The checks exercise that path; real browser fullscreen was not
+  tested.
+- **Column overflow.** At 1024 px a wide select and table pushed the control column under the
+  stage. The first automated checks did not catch it; manual review did. A containment check now
+  guards it.
+- **Stale server.** A server left running from the previous session kept port 8000. It served the
+  new static build but not new backend code, which was unchanged here. It was replaced by a fresh
+  server before the final runs.
+- **Documentation-sync hook.** `PostTaskExec` did not fire because `tasks.md` was edited directly.
+  This section and the README were updated by hand under the hook's rules.

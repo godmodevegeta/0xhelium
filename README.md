@@ -90,7 +90,7 @@ uv sync --extra server
 uv run robustlab serve                           # http://127.0.0.1:8000
 ```
 
-Two presets (tabs **Hidden Phase** and **Stress Test** since M6): **Hidden Phase Vulnerability** shows the precomputed M2 sweep (11/256 falls at
+Two presets (since M6.1 they appear in the **Results** and **Stress test** modes): **Hidden Phase Vulnerability** shows the precomputed M2 sweep (11/256 falls at
 100 N) and re-simulates any timing for a 3D replay. **Live Stress Test** runs real 16-trial
 experiments at 150 N on request and replays each trial. The browser only plays back poses computed
 by MuJoCo on the server.
@@ -105,7 +105,7 @@ uv run python scripts/compare_search.py --seeds 0-19 --budget 64 --shrink-budget
 
 The search looks for the lowest-impulse shove (force 10–150 N, any horizontal direction, start
 2.000–3.020 s, duration 40–200 ms) that makes the robot fall. Each failure is confirmed with a
-paired re-simulation, then shrunk locally. The web app's **Failure Discovery** tab runs the same
+paired re-simulation, then shrunk locally. The web app's **Discover failure** mode runs the same
 search with live progress and replays the result next to the nominal robot.
 
 M5 multi-axis scenarios (floor friction, a payload box welded to the trunk, and the M1 push):
@@ -118,7 +118,7 @@ uv run robustlab scenario --file examples/m5/icy-heavy-shove.json --out runs/m5/
 
 A single run records the scenario, a matched baseline (same friction and payload, push removed)
 and the original trained condition. Values outside the bounds (μ 0.05–1.5, payload 0–5 kg, push
-0–150 N) are rejected, never clamped. The web app's **Scenario Designer** tab edits, validates,
+0–150 N) are rejected, never clamped. The web app's **Design scenario** mode edits, validates,
 runs and replays scenarios. With `OPENROUTER_API_KEY` set on the server (optional
 `OPENROUTER_MODEL`, default `openai/gpt-4o-mini`), it can also turn a description into proposed
 values, which go through the same validator. Without a key everything else still works.
@@ -139,11 +139,15 @@ evaluated), the optimizer settings and seed, rollout counts, timings, the stop r
 vs candidate measurements per episode. Options: `--generations`, `--popsize`, `--max-rollouts`,
 `--wall-clock`, `--workers` (default: CPU count minus 2, at most 8), `--focus`.
 
-The web app puts the controls on the left and the 3D replay on the right in every mode, with
-detailed reports below. It opens on a labelled sample replay. Its **Policy Hardening** mode runs
-the same job, shows CPU optimization progress, and replays the frozen baseline and the candidate
-on identical shoves. `uv run python scripts/ui_checks.py` checks the layout at 1440×900, 1280×800
-and 390×844 against a running server, and runs the main flows.
+The web app (dark theme since M6.1) has five modes: **Design scenario**, **Stress test**,
+**Discover failure**, **Harden controller** and **Results**. Each shows its compact controls and
+one primary action on the left, and the shared 3D replay on the right. The replay shows in-scene
+robot labels, a HUD (shove, friction, payload) with the source of the replay, and a transport with
+the shove interval and fall markers. Detailed evidence is in expandable sections below. The app
+opens on a labelled sample replay. The **Harden controller** mode runs the same job, shows CPU
+optimization progress, and replays the frozen baseline and the candidate on identical shoves.
+`uv run python scripts/ui_checks.py` checks the layout and the main flows against a running server
+at 1440×900, 1280×800, 1024×768 and 390×844 (add `--nokey-base` for the no-OpenRouter fallback).
 
 `walk` checks asset hashes first, prints a summary table and writes `trajectory.json` (50 Hz) and
 `manifest.json` into the `--out` directory. It refuses to replace an existing run unless
@@ -174,6 +178,8 @@ committed; `scripts/fetch_assets.py` re-downloads them from the pinned weeble co
 - `.kiro/specs/m6-cpu-hardening/` — M6 requirements, design and tasks
 - `docs/milestones/M6.md` — M6 evidence: reflex design, calibration, data sets, five-seed results,
   grids, timings, UI checks and screenshots
+- `.kiro/specs/m6-ui-redesign/` and `docs/milestones/M6_UI.md` — M6.1 simulation-first UI: audit,
+  design, before/after screenshots, automated UI checks
 - `docs/decision-log/` — architecture decision records
 
 ## License
